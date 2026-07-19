@@ -30,12 +30,13 @@
     --accent-dim: #7A3020;
     --accent-soft: rgba(224,80,42,0.16);
     --danger: #D64545;
-    --font-display: 'Avenir Next Condensed', 'Helvetica Neue', Arial, sans-serif;
+    --font-display: 'Avenir Next', 'Helvetica Neue', Arial, sans-serif;
     --font-body: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
     --font-mono: 'SF Mono', Menlo, ui-monospace, Consolas, monospace;
   }
 
-  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
+  .note-line, #projectTitle{ -webkit-user-select:text; user-select:text; -webkit-touch-callout:default; }
   html,body{ margin:0; height:100%; overflow:hidden; overscroll-behavior:none; background:var(--bg); }
   body{ font-family:var(--font-body); color:var(--text); }
   button, input, textarea{ font-family:inherit; color:inherit; }
@@ -73,7 +74,7 @@
   .view-toggle-btn svg{ width:16px; height:16px; }
   .view-toggle-btn.active{ background:var(--bg-elevated); color:var(--accent); }
 
-  .brand{ display:flex; align-items:center; gap:9px; flex:1 1 auto; min-width:0; }
+  .brand{ display:flex; align-items:center; gap:9px; flex:1 1 auto; min-width:0; margin-left:4px; }
   .brand-mark{ color:var(--accent); flex:0 0 auto; display:flex; }
   .brand-mark svg{ width:20px; height:20px; }
   #projectTitle{
@@ -203,23 +204,23 @@
   }
 
   .filmstrip.tile-mode{
-    display:grid; grid-auto-flow:column; grid-template-rows:repeat(2, auto);
-    grid-auto-columns:168px; gap:10px; align-content:center; justify-content:start;
+    display:grid; grid-auto-flow:column; grid-template-rows:repeat(3, auto);
+    grid-auto-columns:185px; gap:10px; align-content:center; justify-content:start;
     overflow-x:auto; overflow-y:hidden; padding:16px;
   }
   @media (orientation: portrait){
     .filmstrip.tile-mode{
-      grid-auto-flow:row; grid-template-rows:none; grid-template-columns:repeat(2, 168px);
-      grid-auto-rows:91px;
+      grid-auto-flow:row; grid-template-rows:none; grid-template-columns:repeat(3, 185px);
+      grid-auto-rows:100px;
       overflow-x:hidden; overflow-y:auto; align-content:start; justify-content:center;
     }
   }
   .tile{
-    width:168px; aspect-ratio:1.85; position:relative; flex:0 0 auto;
+    width:185px; aspect-ratio:1.85; position:relative; flex:0 0 auto;
     background:#fff; border:1.5px solid var(--frame-border); overflow:hidden; cursor:pointer; touch-action:pan-x;
   }
-  @media (orientation: portrait){ .tile{ width:168px; height:91px; touch-action:pan-y; } }
-  .tile img{ position:relative; width:100%; height:100%; object-fit:contain; display:block; }
+  @media (orientation: portrait){ .tile{ width:185px; height:100px; touch-action:pan-y; } }
+  .tile img{ position:relative; width:100%; height:100%; object-fit:contain; display:block; -webkit-user-drag:none; }
   .tile-hint{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#B8B8BC; }
   .tile-hint svg{ width:16px; height:16px; opacity:.5; }
   .tile-badge{ position:absolute; top:4px; right:5px; font-family:var(--font-mono); font-size:9.5px; color:#fff; background:rgba(20,20,22,.55); padding:2px 5px; border-radius:5px; pointer-events:none; }
@@ -236,7 +237,8 @@
   body.view-mode .empty-add-btn{ display:none; }
 
   .gutter{ flex:0 0 30px; display:flex; align-items:center; justify-content:center; position:relative; }
-  @media (orientation: portrait){ .gutter{ flex:0 0 20px; } }
+  @media (orientation: portrait){ .gutter{ flex:0 0 20px; } .gutter:not(:first-child){ margin-top:20px; } }
+  @media (orientation: portrait){ body.view-mode .gutter{ margin-top:0; } }
   body.view-mode .gutter{ flex:0 0 0; }
   .add-btn{
     width:27px; height:27px; border-radius:50%; display:flex; align-items:center; justify-content:center;
@@ -256,6 +258,7 @@
   @media (orientation: portrait){
     .cut-unit{ width:100%; height:auto; flex:0 0 auto; padding:0; }
     body.view-mode .cut-unit{ flex-basis:auto; }
+    .handle-row{ margin-top:20px; }
   }
 
   .cut-unit.dragging{ transition:none; z-index:80; }
@@ -361,12 +364,12 @@
   .notes-lines{
     position:relative; height:100%; width:100%; min-width:0; overflow-y:hidden; overflow-x:hidden;
     display:flex; flex-direction:column; padding:0 0 10px;
-    background-image: linear-gradient(var(--paper) 24px, var(--paper-line) 24px, var(--paper-line) 25px, var(--paper) 25px);
-    background-size:100% 25px; background-attachment:local;
+    background-image: linear-gradient(var(--paper) 36px, var(--paper-line) 36px, var(--paper-line) 37.5px, var(--paper) 37.5px);
+    background-size:100% 37.5px; background-attachment:local;
   }
   .note-line{
-    width:100%; min-width:0; height:25px; line-height:25px; flex:0 0 auto;
-    border:none; background:transparent; padding:0 16px; font-size:13.5px; color:var(--ink); outline:none;
+    width:100%; min-width:0; height:37.5px; line-height:37.5px; flex:0 0 auto;
+    border:none; background:transparent; padding:0 16px; font-size:20.25px; color:var(--ink); outline:none;
     white-space:nowrap; overflow:hidden;
   }
   .note-line:focus{ background:var(--accent-soft); }
@@ -374,10 +377,10 @@
 
   .notes-lines.expanded{
     overflow-y:auto; -webkit-overflow-scrolling:touch;
-    background-image: linear-gradient(var(--paper) 29px, var(--paper-line) 29px, var(--paper-line) 30px, var(--paper) 30px);
-    background-size:100% 30px;
+    background-image: linear-gradient(var(--paper) 43.5px, var(--paper-line) 43.5px, var(--paper-line) 45px, var(--paper) 45px);
+    background-size:100% 45px;
   }
-  .notes-lines.expanded .note-line{ height:30px; line-height:30px; font-size:15.5px; padding:0 22px; }
+  .notes-lines.expanded .note-line{ height:45px; line-height:45px; font-size:23.25px; padding:0 22px; }
 
   /* ---------- Notes expand overlay (long-press) ---------- */
   .notes-expand-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; transition:opacity .28s ease; z-index:150; }
@@ -452,7 +455,11 @@
   .tool-btn{ width:38px; height:38px; border-radius:10px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; color:var(--text-dim); border:1px solid transparent; }
   .tool-btn svg{ width:19px; height:19px; }
   .tool-btn.active{ background:var(--accent-soft); color:var(--accent); border-color:var(--accent-dim); }
-  .eraser-type-toggle{ display:flex; gap:2px; background:var(--bg-elevated-2); border-radius:9px; padding:2px; flex:0 0 auto; }
+  .eraser-type-toggle{ display:flex; gap:2px; background:var(--bg-elevated-2); border-radius:9px; padding:2px; flex:0 0 auto; border:1px solid transparent; }
+  .eraser-type-toggle.tool-active{ border-color:var(--accent-dim); }
+  .eraser-icon-btn{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; padding:0; color:var(--text-dim); }
+  .eraser-icon-btn svg{ width:16px; height:16px; }
+  .eraser-icon-btn.active{ color:var(--accent); }
   .eraser-type-btn{ padding:7px 9px; border-radius:7px; font-size:10.5px; font-weight:700; color:var(--text-dim); white-space:nowrap; }
   .eraser-type-btn.active{ background:var(--bg-elevated); color:var(--accent); }
   .color-swatch{ width:26px; height:26px; border-radius:50%; flex:0 0 auto; background:var(--sw); border:2px solid rgba(255,255,255,.22); }
@@ -491,12 +498,12 @@
   .scene-action-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:250; }
   .scene-action-backdrop.show{ opacity:1; pointer-events:auto; }
   .scene-action-sheet{
-    position:fixed; left:50%; top:50%; transform:translate(-50%,-48%); width:min(280px, 82vw);
-    background:var(--bg-elevated); border-radius:16px; padding:8px; z-index:251;
-    opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease;
-    box-shadow:0 24px 60px rgba(0,0,0,.5);
+    position:fixed; width:190px;
+    background:var(--bg-elevated); border-radius:14px; padding:6px; z-index:251;
+    opacity:0; pointer-events:none; transition:opacity .15s ease, transform .15s ease;
+    box-shadow:0 16px 40px rgba(0,0,0,.45); transform:scale(.95); transform-origin:top left;
   }
-  .scene-action-sheet.show{ opacity:1; pointer-events:auto; transform:translate(-50%,-50%); }
+  .scene-action-sheet.show{ opacity:1; pointer-events:auto; transform:scale(1); }
   .scene-action-sheet-title{ padding:12px 12px 10px; font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--text-dim); letter-spacing:.04em; text-align:center; }
   .scene-action-sheet-btn{
     display:block; width:100%; padding:13px 14px; border-radius:11px; font-size:14.5px; font-weight:600;
@@ -720,13 +727,16 @@
     <button class="tool-btn active" data-tool="pen" aria-label="Pen">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z"/></svg>
     </button>
-    <button class="tool-btn" data-tool="eraser" aria-label="Eraser">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H8l-5-5a2 2 0 0 1 0-2.8l9-9a2 2 0 0 1 2.8 0l5.2 5.2a2 2 0 0 1 0 2.8L13 18"/></svg>
-    </button>
     <div class="eraser-type-toggle" id="eraserTypeToggle">
-      <button class="eraser-type-btn active" data-eraser-type="object">Object</button>
+      <button class="eraser-type-btn eraser-icon-btn" data-eraser-type="object" aria-label="Eraser">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H8l-5-5a2 2 0 0 1 0-2.8l9-9a2 2 0 0 1 2.8 0l5.2 5.2a2 2 0 0 1 0 2.8L13 18"/></svg>
+      </button>
+      <button class="eraser-type-btn" data-eraser-type="object">Object</button>
       <button class="eraser-type-btn" data-eraser-type="pixel">Pixel</button>
     </div>
+    <button class="tool-btn" data-tool="move" aria-label="Move photo">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="5 9 2 12 5 15"/><polyline points="9 5 12 2 15 5"/><polyline points="15 19 12 22 9 19"/><polyline points="19 9 22 12 19 15"/><line x1="2" y1="12" x2="22" y2="12"/><line x1="12" y1="2" x2="12" y2="22"/></svg>
+    </button>
     <div class="tool-divider"></div>
     <button class="color-swatch active" data-color="#221F1C" style="--sw:#221F1C" aria-label="Black"></button>
     <button class="color-swatch" data-color="#E0502A" style="--sw:#E0502A" aria-label="Red"></button>
@@ -807,7 +817,7 @@
 <div class="scene-action-sheet" id="sceneActionSheet">
   <div class="scene-action-sheet-title" id="sceneActionSheetTitle">SCENE</div>
   <button class="scene-action-sheet-btn" id="sceneActionRenameBtn">Rename</button>
-  <button class="scene-action-sheet-btn" id="sceneActionMoveBtn">Move…</button>
+  <button class="scene-action-sheet-btn" id="sceneActionMoveBtn">Move into…</button>
   <button class="scene-action-sheet-btn danger" id="sceneActionTrashBtn">Move to Trash</button>
   <button class="scene-action-sheet-btn cancel" id="sceneActionCancelBtn">Cancel</button>
 </div>
@@ -919,6 +929,7 @@
       notesHtml: cut.notesHtml || null,
       editorStrokes: Array.isArray(cut.editorStrokes) ? cut.editorStrokes : null,
       editorPhoto: cut.editorPhoto || null,
+      editorPhotoTransform: cut.editorPhotoTransform || null,
       editorActions: Array.isArray(cut.editorActions) ? cut.editorActions : null,
       editorRedoActions: Array.isArray(cut.editorRedoActions) ? cut.editorRedoActions : null,
       trashedScene: cut.trashedScene != null ? cut.trashedScene : null,
@@ -2107,7 +2118,7 @@
   }
 
   function jumpToCut(id){
-    const unit = filmstripEl.querySelector('.cut-unit[data-unit-id="' + id + '"]');
+    const unit = filmstripEl.querySelector('.cut-unit[data-unit-id="' + id + '"], .tile[data-unit-id="' + id + '"]');
     if(unit){
       const portrait = isPortrait();
       unit.scrollIntoView({ behavior: 'smooth', inline: portrait ? 'nearest' : 'center', block: portrait ? 'center' : 'nearest' });
@@ -2817,10 +2828,23 @@
     document.getElementById('sceneActionSheet').classList.remove('show');
   }
 
-  function openSceneActionSheet(sceneText){
+  function openSceneActionSheet(sceneText, rowEl){
     document.getElementById('sceneActionSheetTitle').textContent = 'SCENE ' + sceneText;
+    const sheet = document.getElementById('sceneActionSheet');
     document.getElementById('sceneActionBackdrop').classList.add('show');
-    document.getElementById('sceneActionSheet').classList.add('show');
+    sheet.classList.add('show');
+    if(rowEl){
+      const rect = rowEl.getBoundingClientRect();
+      const sheetW = sheet.offsetWidth || 190, sheetH = sheet.offsetHeight || 200;
+      const vw = window.innerWidth, vh = window.innerHeight;
+      let left = rect.right - 22; /* small overlap with the row it was long-pressed on */
+      let top = rect.top - 4;
+      if(left + sheetW > vw - 8) left = vw - sheetW - 8;
+      if(top + sheetH > vh - 8) top = vh - sheetH - 8;
+      if(top < 8) top = 8;
+      sheet.style.left = left + 'px';
+      sheet.style.top = top + 'px';
+    }
   }
   document.getElementById('sceneActionRenameBtn').addEventListener('click', () => {
     const sceneText = openSceneMenuId;
@@ -2879,7 +2903,7 @@
       closeAllSceneMenus();
       rowEl.classList.add('menu-open');
       openSceneMenuId = sceneText;
-      openSceneActionSheet(sceneText);
+      openSceneActionSheet(sceneText, rowEl);
     }, 420);
 
     function onMove(ev){
@@ -3271,20 +3295,22 @@
   });
 
   /* ===================== Shared canvas drawing helpers ===================== */
-  function renderFrameCanvas(ctx, baseImage, strokes){
+  function renderFrameCanvas(ctx, baseImage, strokes, transform){
     ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
     ctx.globalCompositeOperation = 'source-over';
     if(baseImage){
-      const scale = Math.min(CANVAS_W / baseImage.width, CANVAS_H / baseImage.height);
+      const t = transform || { scale: 1, offsetX: 0, offsetY: 0 };
+      const fitScale = Math.min(CANVAS_W / baseImage.width, CANVAS_H / baseImage.height);
+      const scale = fitScale * t.scale;
       const w = baseImage.width * scale, h = baseImage.height * scale;
-      const x = (CANVAS_W - w) / 2, y = (CANVAS_H - h) / 2;
+      const x = (CANVAS_W - w) / 2 + t.offsetX, y = (CANVAS_H - h) / 2 + t.offsetY;
       ctx.drawImage(baseImage, x, y, w, h);
     }
     strokes.forEach(s => drawStroke(ctx, s));
     ctx.globalCompositeOperation = 'source-over';
   }
 
-  function flattenToDataURL(ctx, baseImage, strokes){
+  function flattenToDataURL(ctx, baseImage, strokes, transform){
     const canvas = ctx.canvas;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.globalCompositeOperation = 'source-over';
@@ -3294,14 +3320,16 @@
        them even in empty areas that were never actually drawn on. PNG keeps true transparency
        so only the actually-drawn pixels (strokes / pasted photo) cover the guides. */
     if(baseImage){
-      const scale = Math.min(canvas.width / baseImage.width, canvas.height / baseImage.height);
+      const t = transform || { scale: 1, offsetX: 0, offsetY: 0 };
+      const fitScale = Math.min(canvas.width / baseImage.width, canvas.height / baseImage.height);
+      const scale = fitScale * t.scale;
       const w = baseImage.width * scale, h = baseImage.height * scale;
-      const x = (canvas.width - w) / 2, y = (canvas.height - h) / 2;
+      const x = (canvas.width - w) / 2 + t.offsetX, y = (canvas.height - h) / 2 + t.offsetY;
       ctx.drawImage(baseImage, x, y, w, h);
     }
     strokes.forEach(s => drawStroke(ctx, s));
     const url = canvas.toDataURL('image/png');
-    renderFrameCanvas(ctx, baseImage, strokes);
+    renderFrameCanvas(ctx, baseImage, strokes, transform);
     return url;
   }
 
@@ -3319,14 +3347,40 @@
       ctx.restore();
       return;
     }
-    for(let i = 1; i < pts.length; i++){
-      const a = pts[i - 1], b = pts[i];
+    if(pts.length === 2){
+      const a = pts[0], b = pts[1];
       ctx.lineWidth = stroke.size * (0.5 + 0.5 * (b.pressure == null ? 0.5 : b.pressure));
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.lineTo(b.x, b.y);
       ctx.stroke();
+      ctx.restore();
+      return;
     }
+    /* Quadratic-curve-through-midpoints: instead of straight lineTo segments between raw
+       samples (which looks like a jagged polygon at normal sampling rates), curve through
+       the midpoint of each consecutive pair, using the actual sampled point as the control
+       point. This is the standard technique native drawing apps use for natural-looking
+       freehand strokes. Each segment is still stroked separately so pressure-based width
+       variation per point is preserved. */
+    for(let i = 1; i < pts.length - 1; i++){
+      const cur = pts[i], next = pts[i + 1];
+      const midX = (cur.x + next.x) / 2, midY = (cur.y + next.y) / 2;
+      const prevMid = i === 1 ? pts[0] : { x: (pts[i - 1].x + cur.x) / 2, y: (pts[i - 1].y + cur.y) / 2 };
+      ctx.lineWidth = stroke.size * (0.5 + 0.5 * (cur.pressure == null ? 0.5 : cur.pressure));
+      ctx.beginPath();
+      ctx.moveTo(prevMid.x, prevMid.y);
+      ctx.quadraticCurveTo(cur.x, cur.y, midX, midY);
+      ctx.stroke();
+    }
+    const last = pts[pts.length - 1];
+    const secondLast = pts[pts.length - 2];
+    const lastMid = { x: (secondLast.x + last.x) / 2, y: (secondLast.y + last.y) / 2 };
+    ctx.lineWidth = stroke.size * (0.5 + 0.5 * (last.pressure == null ? 0.5 : last.pressure));
+    ctx.beginPath();
+    ctx.moveTo(lastMid.x, lastMid.y);
+    ctx.lineTo(last.x, last.y);
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -3438,13 +3492,16 @@
   const editorEmptyHint = document.getElementById('editorEmptyHint');
   const fileInput = document.getElementById('fileInput');
   const canvasWrap = document.querySelector('.editor-canvas-wrap');
+  const eraserTypeToggle = document.getElementById('eraserTypeToggle');
 
   editorCanvas.width = CANVAS_W;
   editorCanvas.height = CANVAS_H;
 
-  const editorState = { cutId: null, baseImage: null, photoDataURL: null, strokes: [], actions: [], redoActions: [], tool: 'pen', color: '#221F1C', size: 8 };
+  const editorState = { cutId: null, baseImage: null, photoDataURL: null, strokes: [], actions: [], redoActions: [], tool: 'pen', color: '#221F1C', size: 8, photoTransform: { scale: 1, offsetX: 0, offsetY: 0 } };
   let editorEraserType = 'object'; /* 'object' | 'pixel' */
   let drawing = false, currentStroke = null, eraseSessionRemovals = null;
+  let movePointers = new Map(); /* pointerId -> {x,y} local canvas point, active while tool==='move' */
+  let moveGestureStart = null;  /* snapshot of photoTransform + pointer positions at gesture start, for pan/pinch delta math */
 
   function openEditor(cutId){
     if(!editMode) return;
@@ -3456,6 +3513,9 @@
     editorState.strokes = [];
     editorState.tool = 'pen';
     editorState.color = '#221F1C';
+    editorState.photoTransform = cut.editorPhotoTransform ? JSON.parse(JSON.stringify(cut.editorPhotoTransform)) : { scale: 1, offsetX: 0, offsetY: 0 };
+    movePointers.clear();
+    moveGestureStart = null;
     setActiveToolUI();
 
     /* Undo/redo history is restored right alongside the strokes themselves — otherwise the
@@ -3463,6 +3523,7 @@
        be no record of anything to undo even though the drawing is sitting right there. */
     editorState.actions = Array.isArray(cut.editorActions) ? JSON.parse(JSON.stringify(cut.editorActions)) : [];
     editorState.redoActions = Array.isArray(cut.editorRedoActions) ? JSON.parse(JSON.stringify(cut.editorRedoActions)) : [];
+    updateEditorUndoRedoButtons();
 
     const idx = state.order.indexOf(cutId);
     editorCutNumEl.textContent = String(idx + 1).padStart(2, '0');
@@ -3503,7 +3564,7 @@
   }
 
   function redrawEditor(){
-    renderFrameCanvas(ectx, editorState.baseImage, editorState.strokes);
+    renderFrameCanvas(ectx, editorState.baseImage, editorState.strokes, editorState.photoTransform);
   }
 
   function refreshTileImage(id){
@@ -3530,11 +3591,12 @@
       const cut = state.cuts[editorState.cutId];
       if(cut){
         const hasContent = editorState.baseImage || editorState.strokes.length > 0;
-        cut.image = hasContent ? flattenToDataURL(ectx, editorState.baseImage, editorState.strokes) : null;
+        cut.image = hasContent ? flattenToDataURL(ectx, editorState.baseImage, editorState.strokes, editorState.photoTransform) : null;
         /* Keep the live, still-editable drawing data around (separate from the flattened
            cut.image) so reopening the editor can restore individual strokes instead of one
            opaque picture — that's what object eraser needs to keep working. */
         cut.editorPhoto = editorState.photoDataURL || null;
+        cut.editorPhotoTransform = editorState.photoDataURL ? JSON.parse(JSON.stringify(editorState.photoTransform)) : null;
         cut.editorStrokes = JSON.parse(JSON.stringify(editorState.strokes));
         cut.editorActions = JSON.parse(JSON.stringify(editorState.actions));
         cut.editorRedoActions = JSON.parse(JSON.stringify(editorState.redoActions));
@@ -3595,6 +3657,26 @@
 
   editorCanvas.addEventListener('pointerdown', e => {
     editorCanvas.setPointerCapture(e.pointerId);
+    if(editorState.tool === 'move'){
+      if(!editorState.baseImage) return;
+      const p = toLocalPoint(editorCanvas, e);
+      movePointers.set(e.pointerId, p);
+      if(movePointers.size === 1){
+        moveGestureStart = {
+          offsetX: editorState.photoTransform.offsetX, offsetY: editorState.photoTransform.offsetY,
+          scale: editorState.photoTransform.scale, anchor: p
+        };
+      } else if(movePointers.size === 2){
+        const pts = Array.from(movePointers.values());
+        moveGestureStart = {
+          offsetX: editorState.photoTransform.offsetX, offsetY: editorState.photoTransform.offsetY,
+          scale: editorState.photoTransform.scale,
+          dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y),
+          midX: (pts[0].x + pts[1].x) / 2, midY: (pts[0].y + pts[1].y) / 2
+        };
+      }
+      return;
+    }
     drawing = true;
     editorEmptyHint.style.display = 'none';
     const p = toLocalPoint(editorCanvas, e);
@@ -3607,10 +3689,31 @@
       editorState.strokes.push(currentStroke);
       editorState.actions.push({ type: 'add', strokeId: currentStroke.id, strokeData: currentStroke });
       editorState.redoActions = [];
+      updateEditorUndoRedoButtons();
       redrawEditor();
     }
   });
   editorCanvas.addEventListener('pointermove', e => {
+    if(editorState.tool === 'move'){
+      if(!movePointers.has(e.pointerId) || !moveGestureStart) return;
+      movePointers.set(e.pointerId, toLocalPoint(editorCanvas, e));
+      if(movePointers.size === 1){
+        const p = movePointers.get(e.pointerId);
+        editorState.photoTransform.offsetX = moveGestureStart.offsetX + (p.x - moveGestureStart.anchor.x);
+        editorState.photoTransform.offsetY = moveGestureStart.offsetY + (p.y - moveGestureStart.anchor.y);
+        redrawEditor();
+      } else if(movePointers.size === 2){
+        const pts = Array.from(movePointers.values());
+        const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+        const midX = (pts[0].x + pts[1].x) / 2, midY = (pts[0].y + pts[1].y) / 2;
+        const scaleFactor = moveGestureStart.dist > 0 ? dist / moveGestureStart.dist : 1;
+        editorState.photoTransform.scale = Math.max(0.2, Math.min(6, moveGestureStart.scale * scaleFactor));
+        editorState.photoTransform.offsetX = moveGestureStart.offsetX + (midX - moveGestureStart.midX);
+        editorState.photoTransform.offsetY = moveGestureStart.offsetY + (midY - moveGestureStart.midY);
+        redrawEditor();
+      }
+      return;
+    }
     if(!drawing) return;
     const p = toLocalPoint(editorCanvas, e);
     if(editorState.tool === 'eraser' && editorEraserType === 'object'){
@@ -3620,7 +3723,20 @@
       redrawEditor();
     }
   });
-  function endStroke(){
+  function endStroke(e){
+    if(editorState.tool === 'move'){
+      if(e && e.pointerId != null) movePointers.delete(e.pointerId);
+      if(movePointers.size === 1){
+        const remaining = Array.from(movePointers.entries())[0];
+        moveGestureStart = {
+          offsetX: editorState.photoTransform.offsetX, offsetY: editorState.photoTransform.offsetY,
+          scale: editorState.photoTransform.scale, anchor: remaining[1]
+        };
+      } else if(movePointers.size === 0){
+        moveGestureStart = null;
+      }
+      return;
+    }
     if(!drawing) return;
     drawing = false;
     /* A whole object-erase drag (from touch-down to lift-off) commits as a single undo step,
@@ -3629,6 +3745,7 @@
     if(eraseSessionRemovals && eraseSessionRemovals.length > 0){
       editorState.actions.push({ type: 'erase', removed: eraseSessionRemovals });
       editorState.redoActions = [];
+      updateEditorUndoRedoButtons();
     }
     eraseSessionRemovals = null;
     currentStroke = null;
@@ -3649,7 +3766,12 @@
     document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === editorState.tool));
     document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('active', s.dataset.color === editorState.color && editorState.tool === 'pen'));
     document.querySelectorAll('.size-dot').forEach(d => d.classList.toggle('active', Number(d.dataset.size) === editorState.size));
-    document.querySelectorAll('.eraser-type-btn').forEach(b => b.classList.toggle('active', b.dataset.eraserType === editorEraserType));
+    document.querySelectorAll('.eraser-type-btn').forEach(b => b.classList.toggle('active', editorState.tool === 'eraser' && b.dataset.eraserType === editorEraserType));
+    eraserTypeToggle.classList.toggle('tool-active', editorState.tool === 'eraser');
+  }
+  function updateEditorUndoRedoButtons(){
+    document.getElementById('undoBtn').classList.toggle('disabled', editorState.actions.length === 0);
+    document.getElementById('redoBtn').classList.toggle('disabled', editorState.redoActions.length === 0);
   }
   document.querySelectorAll('.tool-btn').forEach(btn => {
     btn.addEventListener('click', () => { editorState.tool = btn.dataset.tool; setActiveToolUI(); });
@@ -3675,6 +3797,7 @@
       }
     }
     editorState.redoActions.push(action);
+    updateEditorUndoRedoButtons();
     redrawEditor();
   });
   document.getElementById('redoBtn').addEventListener('click', () => {
@@ -3689,12 +3812,14 @@
       });
     }
     editorState.actions.push(action);
+    updateEditorUndoRedoButtons();
     redrawEditor();
   });
   document.getElementById('clearBtn').addEventListener('click', () => {
     editorState.strokes = [];
     editorState.actions = [];
     editorState.redoActions = [];
+    updateEditorUndoRedoButtons();
     redrawEditor();
   });
 
