@@ -204,7 +204,7 @@
   }
 
   .filmstrip.tile-mode{
-    display:grid; grid-auto-flow:column; grid-template-rows:repeat(3, auto);
+    display:grid; grid-auto-flow:column; grid-template-rows:repeat(4, auto);
     grid-auto-columns:185px; gap:10px; align-content:center; justify-content:start;
     overflow-x:auto; overflow-y:hidden; padding:16px;
   }
@@ -217,9 +217,9 @@
   }
   .tile{
     width:185px; aspect-ratio:1.85; position:relative; flex:0 0 auto;
-    background:#fff; border:1.5px solid var(--frame-border); overflow:hidden; cursor:pointer; touch-action:pan-x;
+    background:#fff; border:1.5px solid var(--frame-border); overflow:hidden; cursor:pointer; touch-action:none;
   }
-  @media (orientation: portrait){ .tile{ width:185px; height:100px; touch-action:pan-y; } }
+  @media (orientation: portrait){ .tile{ width:185px; height:100px; } }
   .tile img{ position:relative; width:100%; height:100%; object-fit:contain; display:block; -webkit-user-drag:none; }
   .tile-hint{ position:absolute; inset:0; display:flex; align-items:center; justify-content:center; color:#B8B8BC; }
   .tile-hint svg{ width:16px; height:16px; opacity:.5; }
@@ -459,9 +459,9 @@
   .eraser-type-toggle.tool-active{ border-color:var(--accent-dim); }
   .eraser-icon-btn{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; padding:0; color:var(--text-dim); }
   .eraser-icon-btn svg{ width:16px; height:16px; }
-  .eraser-icon-btn.active{ color:var(--accent); }
   .eraser-type-btn{ padding:7px 9px; border-radius:7px; font-size:10.5px; font-weight:700; color:var(--text-dim); white-space:nowrap; }
   .eraser-type-btn.active{ background:var(--bg-elevated); color:var(--accent); }
+  .eraser-icon-btn.active{ background:transparent; color:var(--text-dim); }
   .color-swatch{ width:26px; height:26px; border-radius:50%; flex:0 0 auto; background:var(--sw); border:2px solid rgba(255,255,255,.22); }
   .color-swatch.active{ box-shadow:0 0 0 3px var(--bg-deep), 0 0 0 5px var(--sw); }
   .size-dot{ width:30px; height:30px; border-radius:9px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; border:1px solid transparent; }
@@ -469,6 +469,8 @@
   .size-dot[data-size="4"] i{ width:5px; height:5px; }
   .size-dot[data-size="8"] i{ width:9px; height:9px; }
   .size-dot[data-size="14"] i{ width:14px; height:14px; }
+  .size-dot[data-size="22"] i{ width:19px; height:19px; }
+  .size-dot[data-size="32"] i{ width:24px; height:24px; }
   .size-dot.active{ background:var(--bg-elevated-2); border-color:var(--line-strong); }
   .icon-btn.labeled{ width:auto; padding:0 13px; gap:6px; font-size:12.5px; font-weight:700; border:1px solid var(--line-strong); border-radius:19px; }
   .icon-btn.labeled svg{ width:16px; height:16px; }
@@ -746,6 +748,8 @@
     <button class="size-dot" data-size="4" aria-label="Thin"><i></i></button>
     <button class="size-dot active" data-size="8" aria-label="Medium"><i></i></button>
     <button class="size-dot" data-size="14" aria-label="Thick"><i></i></button>
+    <button class="size-dot" data-size="22" aria-label="Extra thick"><i></i></button>
+    <button class="size-dot" data-size="32" aria-label="Widest"><i></i></button>
     <div class="tool-divider"></div>
     <button id="undoBtn" class="icon-btn" aria-label="Undo">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h9a5 5 0 0 1 0 10h-2M3 10l5-5M3 10l5 5"/></svg>
@@ -1139,9 +1143,38 @@
   }
 
   /* ===================== Edit mode ===================== */
+  /* Finds whichever shot card is currently closest to the center of the viewport, so its
+     position can be restored after something (a re-render, a CSS-driven width change) would
+     otherwise leave the scroll position pointing at different content than what the user was
+     actually looking at. */
+  function findCenteredCutId(){
+    const portrait = isPortrait();
+    const selector = viewMode === 'tile' ? '.tile[data-unit-id]' : '.cut-unit[data-unit-id]';
+    const els = filmstripEl.querySelectorAll(selector);
+    if(els.length === 0) return null;
+    const containerRect = filmstripEl.getBoundingClientRect();
+    const centerPoint = portrait ? (containerRect.top + containerRect.height / 2) : (containerRect.left + containerRect.width / 2);
+    let closestId = null, closestDist = Infinity;
+    els.forEach(el => {
+      const r = el.getBoundingClientRect();
+      const mid = portrait ? (r.top + r.height / 2) : (r.left + r.width / 2);
+      const dist = Math.abs(mid - centerPoint);
+      if(dist < closestDist){ closestDist = dist; closestId = el.dataset.unitId; }
+    });
+    return closestId;
+  }
+  function restoreScrollToCut(id){
+    const selector = viewMode === 'tile' ? '.tile[data-unit-id="' + id + '"]' : '.cut-unit[data-unit-id="' + id + '"]';
+    const el = filmstripEl.querySelector(selector);
+    if(!el) return;
+    const portrait = isPortrait();
+    el.scrollIntoView({ behavior: 'instant', inline: portrait ? 'nearest' : 'center', block: portrait ? 'center' : 'nearest' });
+  }
+
   function setEditMode(on){
     const wasEditing = editMode;
     editMode = on;
+    const anchorId = findCenteredCutId();
     document.body.classList.toggle('view-mode', !editMode);
     editToggleBtn.textContent = editMode ? 'Done' : 'Edit';
     editToggleBtn.classList.toggle('active', editMode);
@@ -1151,6 +1184,7 @@
     if(!editMode) closeNotesExpand();
     if(!editMode && selectMode){ exitSelectMode(); renderFilmstrip(); }
     if(wasEditing && !editMode) applySceneReordering();
+    if(anchorId) restoreScrollToCut(anchorId);
     updateSelectButtonVisibility();
     document.querySelectorAll('.scene-input-top').forEach(el => { el.readOnly = appMode === 'trash' || !editMode; });
     document.querySelectorAll('.note-line').forEach(el => { el.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true'; });
@@ -1400,7 +1434,9 @@
     if(e.pointerType === 'mouse' && e.button !== 0) return;
     const pointerId = e.pointerId;
     const startX = e.clientX, startY = e.clientY;
-    let phase = 'idle';
+    const portrait = isPortrait();
+    const startScroll = portrait ? filmstripEl.scrollTop : filmstripEl.scrollLeft;
+    let phase = 'idle'; /* idle -> scrolling | drag | tap */
 
     const timer = setTimeout(() => {
       if(phase !== 'idle' || !editMode) return;
@@ -1409,31 +1445,51 @@
     }, 260);
 
     function onPreMove(ev){
-      if(ev.pointerId !== pointerId || phase !== 'idle') return;
-      if(Math.hypot(ev.clientX - startX, ev.clientY - startY) > 8){
-        phase = 'cancelled'; clearTimeout(timer); cleanupPre();
+      if(ev.pointerId !== pointerId) return;
+      if(phase !== 'idle' && phase !== 'scrolling') return;
+      const dx = ev.clientX - startX, dy = ev.clientY - startY;
+      if(phase === 'idle'){
+        if(Math.hypot(dx, dy) <= 8) return;
+        /* Moved enough to be a swipe-to-browse, not a long-press-drag. Take over scrolling
+           manually from here — .tile uses touch-action:none precisely so the browser never
+           starts its own native pan for this gesture (that race with our long-press timer is
+           what caused tiles to get stuck mid-drag: native scroll would already be underway by
+           the time our JS drag logic tried to take over). */
+        phase = 'scrolling';
+        clearTimeout(timer);
       }
+      ev.preventDefault();
+      if(portrait) filmstripEl.scrollTop = startScroll - dy;
+      else filmstripEl.scrollLeft = startScroll - dx;
     }
     function onPreUp(ev){
-      if(ev.pointerId !== pointerId || phase !== 'idle') return;
-      phase = 'tap'; clearTimeout(timer); cleanupPre();
-      if(editMode){
-        openEditor(id);
-      } else {
-        setViewMode('basic');
-        requestAnimationFrame(() => jumpToCut(id));
+      if(ev.pointerId !== pointerId) return;
+      if(phase !== 'idle' && phase !== 'scrolling') return;
+      clearTimeout(timer);
+      const wasIdle = phase === 'idle';
+      cleanupPre();
+      if(wasIdle){
+        if(editMode){
+          openEditor(id);
+        } else {
+          setViewMode('basic');
+          requestAnimationFrame(() => jumpToCut(id));
+        }
       }
     }
     function cleanupPre(){
       document.removeEventListener('pointermove', onPreMove);
       document.removeEventListener('pointerup', onPreUp);
+      document.removeEventListener('pointercancel', onPreUp);
     }
     document.addEventListener('pointermove', onPreMove);
     document.addEventListener('pointerup', onPreUp);
+    document.addEventListener('pointercancel', onPreUp);
 
     function beginDrag(){
       cleanupPre();
       tileEl.classList.add('dragging');
+      const dragStartScroll = portrait ? filmstripEl.scrollTop : filmstripEl.scrollLeft;
 
       function getOtherEntries(){
         /* Re-query sibling rects on every call — caching them once at drag-start goes stale
@@ -1445,17 +1501,48 @@
       }
       let currentTarget = computeTargetIndexGrid(startX, startY, getOtherEntries());
 
+      let scrollDir = 0, rafId = null;
+      function autoScrollLoop(){
+        if(scrollDir !== 0){
+          if(portrait) filmstripEl.scrollTop += scrollDir * 14;
+          else filmstripEl.scrollLeft += scrollDir * 14;
+        }
+        rafId = requestAnimationFrame(autoScrollLoop);
+      }
+      rafId = requestAnimationFrame(autoScrollLoop);
+
       function onMove(ev){
         if(ev.pointerId !== pointerId) return;
         ev.preventDefault();
+        /* The tile stays put in the grid (only visually offset via transform), so container
+           autoscroll moves the underlying grid on its own; compensate the manual translate by
+           that same scroll delta so the tile doesn't drift away from the finger. */
+        const scrollDelta = (portrait ? filmstripEl.scrollTop : filmstripEl.scrollLeft) - dragStartScroll;
         const dx = ev.clientX - startX, dy = ev.clientY - startY;
-        tileEl.style.transform = 'translate(' + dx + 'px,' + dy + 'px) scale(1.08)';
+        const adjDx = portrait ? dx : dx + scrollDelta;
+        const adjDy = portrait ? dy + scrollDelta : dy;
+        tileEl.style.transform = 'translate(' + adjDx + 'px,' + adjDy + 'px) scale(1.08)';
         currentTarget = computeTargetIndexGrid(ev.clientX, ev.clientY, getOtherEntries());
+
+        const contRect = filmstripEl.getBoundingClientRect();
+        const edge = 50;
+        if(portrait){
+          if(ev.clientY < contRect.top + edge) scrollDir = -1;
+          else if(ev.clientY > contRect.bottom - edge) scrollDir = 1;
+          else scrollDir = 0;
+        } else {
+          if(ev.clientX < contRect.left + edge) scrollDir = -1;
+          else if(ev.clientX > contRect.right - edge) scrollDir = 1;
+          else scrollDir = 0;
+        }
       }
       function onUp(ev){
         if(ev.pointerId !== pointerId) return;
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onUp);
+        scrollDir = 0;
+        if(rafId){ cancelAnimationFrame(rafId); rafId = null; }
         tileEl.classList.remove('dragging');
         tileEl.style.transform = '';
         const arr = state.order.filter(x => x !== id);
@@ -1469,6 +1556,7 @@
       }
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onUp);
     }
   }
 
@@ -1662,7 +1750,6 @@
     cut.notesHtml = lines.map(l => '<div>' + (l.innerHTML || '<br>') + '</div>').join('');
     cut.notes = lines.map(l => stripTagsToText(l.innerHTML)).join('\n');
     debouncedSaveCut(cut.id);
-    sceneEditedIds.add(cut.id);
   }
 
   function onLineInput(cut, wrap, div){
@@ -2285,9 +2372,13 @@
     const number = parseSceneNumber(sceneText);
     if(number === null) return; /* no number to anchor the rename to — shouldn't normally happen */
     const currentName = parseSceneName(sceneText);
-    const result = await showPrompt('Rename Scene ' + number, currentName, 'Rename');
+    const prefillText = buildSceneText(number, currentName);
+    const result = await showPrompt('Rename Scene ' + number, prefillText, 'Rename');
     if(result === null) return; /* cancelled */
-    const newText = buildSceneText(number, result);
+    let newName = result.trim();
+    const prefixMatch = newName.match(new RegExp('^\\s*S#' + number + '\\s*-\\s*(.*)$'));
+    if(prefixMatch) newName = prefixMatch[1].trim();
+    const newText = buildSceneText(number, newName);
     if(newText === sceneText) return;
     pushUndoSnapshot();
     const changedIds = [];
@@ -3758,7 +3849,6 @@
       editorEraserType = btn.dataset.eraserType;
       editorState.tool = 'eraser';
       setActiveToolUI();
-      document.querySelectorAll('.eraser-type-btn').forEach(b => b.classList.toggle('active', b === btn));
     });
   });
 
