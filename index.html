@@ -179,6 +179,32 @@
 
   /* ---------- Stage / filmstrip ---------- */
   .stage{ flex:1 1 auto; min-width:0; display:flex; flex-direction:column; }
+
+  /* ---------- First/last shot navigation buttons ---------- */
+  /* Fixed to the viewport (not .stage) so it's never clipped and always sits in the same
+     physical corner regardless of scroll position. z-index 20 is deliberate: above ordinary
+     filmstrip content, but below the sidebar backdrop (35) and every modal/editor overlay
+     (100+) — so it's correctly covered/blocked whenever any of those are open, with no extra
+     JS show/hide logic needed for that case. Stacks vertically (up/down) in portrait and
+     horizontally (left/right) in landscape, matching whichever axis the filmstrip itself
+     actually scrolls on for that orientation (see "Tile View" / "Scroll only via instant
+     scrollTo" in project instructions — orientation always drives the scroll axis here too). */
+  .nav-buttons{
+    position:fixed; right:calc(16px + env(safe-area-inset-right)); bottom:calc(16px + env(safe-area-inset-bottom));
+    z-index:20; display:flex; flex-direction:column; gap:10px;
+  }
+  @media (orientation: landscape){ .nav-buttons{ flex-direction:row; } }
+  .nav-buttons.hidden{ display:none; }
+  .nav-btn{
+    width:44px; height:44px; border-radius:50%; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:center;
+    background:var(--bg-elevated); border:1px solid var(--line-strong); color:var(--text-dim);
+    box-shadow:0 4px 14px rgba(0,0,0,.25);
+  }
+  .nav-btn:hover{ background:var(--bg-elevated-2); color:var(--text); }
+  .nav-btn:active{ transform:scale(0.94); }
+  .nav-btn svg{ width:20px; height:20px; }
+
   .sprockets, .sprockets-bottom{
     height:13px; flex:0 0 auto; background:var(--bg-elevated);
     background-image: radial-gradient(circle, rgba(255,255,255,.14) 2.3px, transparent 2.4px);
@@ -703,6 +729,10 @@
         <div class="loading-state">Loading…</div>
       </div>
       <div class="sprockets-bottom"></div>
+      <div class="nav-buttons hidden" id="navButtons">
+        <button id="navFirstBtn" class="nav-btn" aria-label="Jump to first shot"></button>
+        <button id="navLastBtn" class="nav-btn" aria-label="Jump to last shot"></button>
+      </div>
     </div>
   </div>
 </div>
@@ -883,7 +913,11 @@
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-12"/></svg>',
     pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z"/></svg>',
     film: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4"/></svg>',
-    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>'
+    check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>',
+    chevronUp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 15 6-6 6 6"/></svg>',
+    chevronDown: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>',
+    chevronLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m15 6-6 6 6 6"/></svg>',
+    chevronRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>'
   };
 
   /* ===================== State ===================== */
@@ -1162,6 +1196,35 @@
   const titleEl = document.getElementById('projectTitle');
   const editToggleBtn = document.getElementById('editToggleBtn');
   const addSceneBtn = document.getElementById('addSceneBtn');
+  const navButtonsEl = document.getElementById('navButtons');
+  const navFirstBtn = document.getElementById('navFirstBtn');
+  const navLastBtn = document.getElementById('navLastBtn');
+
+  /* ===================== First/last shot navigation buttons ===================== */
+  /* Icons swap between up/down and left/right based on orientation, but which physical
+     button jumps where never changes (navFirstBtn always -> first shot, navLastBtn always
+     -> last shot) — the container's own flex-direction media query (portrait: column,
+     landscape: row) is what actually repositions them, so "first" naturally ends up on top
+     in portrait and on the left in landscape, and "last" on bottom / right respectively. */
+  function updateNavButtonsOrientation(){
+    const portrait = isPortrait();
+    navFirstBtn.innerHTML = portrait ? ICONS.chevronUp : ICONS.chevronLeft;
+    navLastBtn.innerHTML = portrait ? ICONS.chevronDown : ICONS.chevronRight;
+  }
+  function updateNavButtonsVisibility(){
+    const activeOrder = appMode === 'trash' ? state.trashOrder : state.order;
+    navButtonsEl.classList.toggle('hidden', activeOrder.length === 0);
+  }
+  navFirstBtn.addEventListener('click', () => {
+    const activeOrder = appMode === 'trash' ? state.trashOrder : state.order;
+    if(activeOrder.length) jumpToCut(activeOrder[0]);
+  });
+  navLastBtn.addEventListener('click', () => {
+    const activeOrder = appMode === 'trash' ? state.trashOrder : state.order;
+    if(activeOrder.length) jumpToCut(activeOrder[activeOrder.length - 1]);
+  });
+  updateNavButtonsOrientation();
+  window.addEventListener('resize', updateNavButtonsOrientation, { passive: true });
 
   /* ===================== Sidebar open/close ===================== */
   function openSidebar(){ sidebarEl.classList.add('open'); backdropEl.classList.add('show'); }
@@ -1485,6 +1548,7 @@
     }
     updateSidebarCutCount();
     updateSelectToolbar();
+    updateNavButtonsVisibility();
   }
 
   function buildEmptyState(){
@@ -1573,21 +1637,130 @@
     return past ? closestIdx + 1 : closestIdx;
   }
 
+  /* Shot drag-reorder (both Tile View long-press and Normal View's "///" handle) is allowed to
+     move a shot into a different scene's run — dropping it there reassigns cut.scene to match
+     its new neighbors (inheriting from the shot immediately before the drop point, or the one
+     immediately after if dropped at the very start of the whole list — same "inherit from the
+     preceding shot" convention insertCut already uses for brand-new shots). Shot labels are
+     computed dynamically from contiguous same-scene runs (computeShotLabelsForList), so once
+     cut.scene is correctly reassigned, every affected letter — the moved shot's and everything
+     after it in its new scene — recomputes correctly on its own with no duplicates; nothing
+     needs to be written for the letters themselves. If the shot being moved was the *only*
+     member of its old scene, that scene now has zero shots left, which would otherwise leave a
+     gap in the sequential scene numbering (see Instructions: "Scene numbers stay sequential
+     with no gaps") — so that case additionally triggers a full renumber. Dropping back within
+     the shot's own existing scene (including its own current spot) is scene-preserving, as
+     before. Returns { arr, newScene, changed, sourceSceneEmptied }; arr is the full new
+     state.order with the shot spliced into targetIndex. */
+  function computeSceneAwareReorder(id, targetIndex){
+    const cut = state.cuts[id];
+    const myScene = cut ? (cut.scene || '') : '';
+    const withoutId = state.order.filter(x => x !== id);
+    let newScene = myScene;
+    if(withoutId.length > 0){
+      const leftId = targetIndex > 0 ? withoutId[targetIndex - 1] : null;
+      const rightId = targetIndex < withoutId.length ? withoutId[targetIndex] : null;
+      const leftScene = leftId ? (state.cuts[leftId].scene || '') : null;
+      const rightScene = rightId ? (state.cuts[rightId].scene || '') : null;
+      if(leftScene !== myScene && rightScene !== myScene){
+        if(leftScene !== null) newScene = leftScene;
+        else if(rightScene !== null) newScene = rightScene;
+      }
+    }
+    const changed = newScene !== myScene;
+    const sourceSceneEmptied = changed && !withoutId.some(otherId => (state.cuts[otherId].scene || '') === myScene);
+    const arr = withoutId.slice();
+    arr.splice(targetIndex, 0, id);
+    return { arr, newScene, changed, sourceSceneEmptied };
+  }
+
+  /* Shared apply step for both drag surfaces: commit a computeSceneAwareReorder() result to
+     state, persist whatever actually changed, and re-render. Kept in one place so Tile View and
+     Normal View's handle-drag can't drift out of sync on this. */
+  function applySceneAwareReorder(id, targetIndex){
+    const result = computeSceneAwareReorder(id, targetIndex);
+    const orderChanged = result.arr.join(',') !== state.order.join(',');
+    if(orderChanged || result.changed) pushUndoSnapshot();
+    if(result.changed) state.cuts[id].scene = result.newScene;
+    state.order = result.arr;
+    if(orderChanged) saveOrder();
+    if(result.changed) saveCut(id);
+    if(result.sourceSceneEmptied){
+      /* Moving this shot out emptied its old scene entirely, which would otherwise leave a gap
+         in sequential scene numbering — closes that gap. Renders internally. */
+      renumberAllScenesSequentially();
+    } else {
+      renderFilmstrip();
+      if(result.changed) renderScenesList(); // per-scene shot counts in the sidebar shifted
+    }
+    if(orderChanged || result.changed) requestAnimationFrame(() => flashUnit(id));
+  }
+
+  /* Rolling-window velocity tracker for a single touch/pointer gesture. Computing release
+     velocity from only the single most-recent pointermove delta is fragile: real touch
+     gestures very often deliver a final pointermove with a near-zero delta right before
+     pointerup (the finger settles for a moment before lifting, even after a fast flick) —
+     that last near-zero sample would otherwise overwrite the tracked velocity and make
+     momentum feel like it dead-stops the instant you lift your finger. Keeping a short
+     trailing window and measuring across its full span at release time smooths past that
+     last-sample artifact while still being responsive (a deliberate stop-and-hold still
+     correctly reads as ~zero velocity, since by then all samples in the window are stationary). */
+  function createVelocityTracker(initialPos){
+    const WINDOW_MS = 100;
+    let samples = [{ t: performance.now(), pos: initialPos }];
+    return {
+      reset(pos){ samples = [{ t: performance.now(), pos }]; },
+      sample(pos){
+        const now = performance.now();
+        samples.push({ t: now, pos });
+        while(samples.length > 1 && now - samples[0].t > WINDOW_MS) samples.shift();
+      },
+      /* Returns px/ms in raw pointer-movement direction (not yet sign-adjusted for scroll). */
+      release(){
+        if(samples.length < 2) return 0;
+        const oldest = samples[0], newest = samples[samples.length - 1];
+        const dt = newest.t - oldest.t;
+        return dt > 0 ? (newest.pos - oldest.pos) / dt : 0;
+      }
+    };
+  }
+
+
   /* Manual momentum/inertia scroll for surfaces that use touch-action:none (tiles, sidebar
      scene list) — native momentum never kicks in on those since the browser's own pan is
      disabled entirely (4.8), so a plain release just dead-stops the scroll. This replicates
      the missing "flick and coast, decelerating" feel with a simple per-frame friction decay,
      always via explicit instant scrollTo (4.7) — never smooth. Returns a cancel function so a
-     fresh touch-down (or a tool/mode change) can stop it instantly, same as a real flick would. */
+     fresh touch-down (or a tool/mode change) can stop it instantly, same as a real flick would.
+
+     On a short list (few scenes in the sidebar, few shots in a small project) the un-cushioned
+     version could reach the top/bottom edge within just 2-3 frames even while friction was
+     technically being applied every frame — with that little travel distance, a human can't
+     perceptually tell the difference between "decelerating" and "instantly slamming into the
+     wall", so it read as if momentum wasn't decelerating at all. Real iOS doesn't have this
+     problem because it rubber-bands (a soft overscroll-and-spring-back) rather than hard
+     -clamping at the edge; CUSHION below approximates that same softened landing — velocity
+     gets progressively damped once within CUSHION px of a boundary, proportional to how close
+     it is — without needing a full overscroll/bounce-back animation. Native-scroll surfaces
+     (Normal View's card list) don't need any of this, since real -webkit-overflow-scrolling
+     already rubber-bands on its own. */
   function startMomentumScroll(container, axis, initialVelocityPerFrame){
     const FRICTION = 0.945;
     const MIN_VELOCITY = 0.4;
+    const CUSHION = 70; // px -- distance from an edge where extra damping kicks in
     let vel = initialVelocityPerFrame;
     let rafId = null;
     function step(){
       vel *= FRICTION;
       const max = axis === 'y' ? (container.scrollHeight - container.clientHeight) : (container.scrollWidth - container.clientWidth);
       const current = axis === 'y' ? container.scrollTop : container.scrollLeft;
+      if(vel > 0){
+        const distToMax = max - current;
+        if(distToMax > 0 && distToMax < CUSHION) vel *= (distToMax / CUSHION);
+      } else if(vel < 0){
+        const distToMin = current;
+        if(distToMin > 0 && distToMin < CUSHION) vel *= (distToMin / CUSHION);
+      }
       let next = current + vel;
       let stop = false;
       if(next <= 0){ next = 0; stop = true; }
@@ -1611,9 +1784,7 @@
     const portrait = isPortrait();
     const startScroll = portrait ? filmstripEl.scrollTop : filmstripEl.scrollLeft;
     let phase = 'idle'; /* idle -> scrolling | drag | tap */
-    let velTrackT = performance.now();
-    let velTrackPos = portrait ? startY : startX;
-    let scrollVelocity = 0; /* px/ms, already sign-adjusted for scroll direction (not pointer direction) */
+    const velTracker = createVelocityTracker(portrait ? startY : startX);
 
     const timer = setTimeout(() => {
       if(phase !== 'idle' || !editMode) return;
@@ -1634,18 +1805,12 @@
            the time our JS drag logic tried to take over). */
         phase = 'scrolling';
         clearTimeout(timer);
-        velTrackT = performance.now();
-        velTrackPos = portrait ? ev.clientY : ev.clientX;
+        velTracker.reset(portrait ? ev.clientY : ev.clientX);
       }
       ev.preventDefault();
       if(portrait) filmstripEl.scrollTo({ top: startScroll - dy, behavior: 'instant' });
       else filmstripEl.scrollTo({ left: startScroll - dx, behavior: 'instant' });
-      const nowT = performance.now();
-      const nowPos = portrait ? ev.clientY : ev.clientX;
-      const dt = nowT - velTrackT;
-      if(dt > 0) scrollVelocity = -((nowPos - velTrackPos) / dt);
-      velTrackT = nowT;
-      velTrackPos = nowPos;
+      velTracker.sample(portrait ? ev.clientY : ev.clientX);
     }
     function onPreUp(ev){
       if(ev.pointerId !== pointerId) return;
@@ -1662,7 +1827,7 @@
           requestAnimationFrame(() => jumpToCut(id));
         }
       } else if(wasScrolling){
-        let perFrame = scrollVelocity * 16.67;
+        let perFrame = -velTracker.release() * 16.67;
         const MAXV = 90;
         perFrame = Math.max(-MAXV, Math.min(MAXV, perFrame));
         if(Math.abs(perFrame) > 0.5){
@@ -1738,14 +1903,7 @@
         if(rafId){ cancelAnimationFrame(rafId); rafId = null; }
         tileEl.classList.remove('dragging');
         tileEl.style.transform = '';
-        const arr = state.order.filter(x => x !== id);
-        arr.splice(currentTarget, 0, id);
-        const changed = arr.join(',') !== state.order.join(',');
-        if(changed) pushUndoSnapshot();
-        state.order = arr;
-        if(changed) saveOrder();
-        renderFilmstrip();
-        requestAnimationFrame(() => flashUnit(id));
+        applySceneAwareReorder(id, currentTarget);
       }
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
@@ -2325,14 +2483,7 @@
       if(dragging){
         unitEl.classList.remove('dragging');
         unitEl.style.transform = '';
-        const arr = state.order.filter(x => x !== id);
-        arr.splice(currentTarget, 0, id);
-        const changed = arr.join(',') !== state.order.join(',');
-        if(changed) pushUndoSnapshot();
-        state.order = arr;
-        if(changed) saveOrder();
-        renderFilmstrip();
-        requestAnimationFrame(() => flashUnit(id));
+        applySceneAwareReorder(id, currentTarget);
       } else {
         toggleUnitMenu(id);
       }
@@ -2361,6 +2512,52 @@
   }
 
   /* ===================== Insert / delete ===================== */
+  /* Snapshots every current card's on-screen rect, keyed by cut id, so a subsequent re-render
+     can FLIP-animate any survivors from their old position to their new one. Only meaningful
+     in Normal View (tile view has no "+" insert entry point), but harmless to call regardless
+     — tile mode just yields an empty map and the animation pass below becomes a no-op. */
+  function captureCutUnitRects(){
+    const map = {};
+    filmstripEl.querySelectorAll('.cut-unit[data-unit-id]').forEach(el => {
+      map[el.dataset.unitId] = el.getBoundingClientRect();
+    });
+    return map;
+  }
+  /* Plays the actual insertion animation after the DOM has already been rebuilt by
+     renderFilmstrip(): every pre-existing card slides (via an inverted-transform FLIP) from its
+     captured old rect into wherever it landed now — this is what reads as the trailing cards
+     smoothly shifting right (landscape) or down (portrait) to make room — while the brand-new
+     card (no old rect to slide from) simply fades into the gap that opened up for it. */
+  function playInsertShiftAnimation(oldRects, newId){
+    const DURATION = 620;
+    filmstripEl.querySelectorAll('.cut-unit[data-unit-id]').forEach(el => {
+      const id = el.dataset.unitId;
+      if(id === newId){
+        el.style.transition = 'none';
+        el.style.opacity = '0';
+        void el.offsetWidth;
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          el.style.transition = 'opacity ' + DURATION + 'ms ease';
+          el.style.opacity = '';
+        }));
+        setTimeout(() => { el.style.transition = ''; el.style.opacity = ''; }, DURATION + 20);
+        return;
+      }
+      const oldRect = oldRects[id];
+      if(!oldRect) return;
+      const newRect = el.getBoundingClientRect();
+      const dx = oldRect.left - newRect.left, dy = oldRect.top - newRect.top;
+      if(!dx && !dy) return;
+      el.style.transition = 'none';
+      el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      void el.offsetWidth;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        el.style.transition = 'transform ' + DURATION + 'ms cubic-bezier(.32,.72,0,1)';
+        el.style.transform = '';
+      }));
+      setTimeout(() => { el.style.transition = ''; el.style.transform = ''; }, DURATION + 20);
+    });
+  }
   function insertCut(index){
     if(!editMode || appMode === 'trash') return;
     pushUndoSnapshot();
@@ -2370,11 +2567,13 @@
     else if(index > 0) inheritedScene = state.cuts[state.order[index - 1]].scene || '';
     else inheritedScene = state.cuts[state.order[0]].scene || '';
     state.cuts[id] = { id, scene: inheritedScene, notes: '', image: null };
+    const oldRects = captureCutUnitRects();
     state.order.splice(index, 0, id);
     saveOrder();
     saveCut(id);
     renderFilmstrip();
     renderScenesList();
+    playInsertShiftAnimation(oldRects, id);
     requestAnimationFrame(() => jumpToCut(id));
   }
 
@@ -2405,13 +2604,29 @@
   }
 
   /* ===================== Global undo / redo (structural changes) ===================== */
+  /* This undo system only ever needs to track STRUCTURAL changes (order, scene assignment,
+     trash state) — never drawing/photo content, which has its own separate per-cut undo system
+     (editorActions/editorRedoActions, see the fullscreen editor). Every field that global undo
+     might need to roll back (scene, notes, notesHtml, trashedScene/trashedShotNumber/trashedAt)
+     is always *reassigned wholesale* elsewhere in the code, never mutated in place inside a
+     nested array/object — so a one-level-deep shallow copy per cut is enough to correctly
+     freeze a snapshot; it doesn't need JSON.parse(JSON.stringify(...)) walking into (and
+     duplicating) every shot's image dataURL / editorStrokes / editorActions. That deep clone
+     was happening on *every single* structural edit (it's what pushUndoSnapshot did under the
+     hood), so its cost scaled with the *entire project's* image data, not just what changed —
+     on a large project (250+ shots) this got expensive enough to exhaust memory and crash. */
+  function shallowCloneCuts(cuts){
+    const out = {};
+    for(const id in cuts) out[id] = { ...cuts[id] };
+    return out;
+  }
   function snapshotState(){
-    return { order: state.order.slice(), trashOrder: (state.trashOrder || []).slice(), cuts: JSON.parse(JSON.stringify(state.cuts)) };
+    return { order: state.order.slice(), trashOrder: (state.trashOrder || []).slice(), cuts: shallowCloneCuts(state.cuts) };
   }
   function applySnapshot(snap){
     state.order = snap.order.slice();
     state.trashOrder = (snap.trashOrder || []).slice();
-    state.cuts = JSON.parse(JSON.stringify(snap.cuts));
+    state.cuts = shallowCloneCuts(snap.cuts);
   }
   function pushUndoSnapshot(){
     undoStack.push(snapshotState());
@@ -2419,18 +2634,39 @@
     redoStackGlobal = [];
     updateUndoRedoButtons();
   }
-  function persistWholeState(){
+  /* Only re-persists cuts whose structural fields actually differ between oldCuts (the set
+     just before an undo/redo swapped state.cuts) and the newly-restored state.cuts — comparing
+     cheap string/primitive fields only, never touching image/editorStrokes data. Previously this
+     unconditionally called saveCut() for every single cut in the project on every undo/redo
+     click, which on a large project meant rewriting hundreds of storage entries (each
+     potentially containing image data) for a single click. */
+  function persistWholeState(oldCuts){
     saveOrder();
     saveTrashOrder();
-    Object.keys(state.cuts).forEach(id => saveCut(id));
+    const newCuts = state.cuts;
+    const ids = new Set([...Object.keys(oldCuts), ...Object.keys(newCuts)]);
+    ids.forEach(id => {
+      const before = oldCuts[id], after = newCuts[id];
+      if(!after) return; // no longer present -- nothing to persist
+      if(!before ||
+         before.scene !== after.scene ||
+         before.notes !== after.notes ||
+         before.notesHtml !== after.notesHtml ||
+         before.trashedScene !== after.trashedScene ||
+         before.trashedShotNumber !== after.trashedShotNumber ||
+         before.trashedAt !== after.trashedAt){
+        saveCut(id);
+      }
+    });
   }
   function doUndo(){
     if(undoStack.length === 0) return;
     const current = snapshotState();
     const prev = undoStack.pop();
     redoStackGlobal.push(current);
+    const oldCuts = state.cuts;
     applySnapshot(prev);
-    persistWholeState();
+    persistWholeState(oldCuts);
     renderFilmstrip();
     renderScenesList();
     updateUndoRedoButtons();
@@ -2440,8 +2676,9 @@
     const current = snapshotState();
     const next = redoStackGlobal.pop();
     undoStack.push(current);
+    const oldCuts = state.cuts;
     applySnapshot(next);
-    persistWholeState();
+    persistWholeState(oldCuts);
     renderFilmstrip();
     renderScenesList();
     updateUndoRedoButtons();
@@ -3182,9 +3419,7 @@
     const scroller = document.querySelector('.sidebar-scroll');
     const startScrollTop = scroller ? scroller.scrollTop : 0;
     let phase = 'idle'; /* idle -> scrolling | longpress -> drag, or tap, or cancelled */
-    let velTrackT = performance.now();
-    let velTrackY = startY;
-    let scrollVelocity = 0; /* px/ms, sign-adjusted for scroll direction */
+    const velTracker = createVelocityTracker(startY);
 
     const timer = setTimeout(() => {
       if(phase !== 'idle') return;
@@ -3206,16 +3441,11 @@
              under a reorder attempt). */
           phase = 'scrolling';
           clearTimeout(timer);
-          velTrackT = performance.now();
-          velTrackY = ev.clientY;
+          velTracker.reset(ev.clientY);
         }
       } else if(phase === 'scrolling'){
         if(scroller) scroller.scrollTo({ top: startScrollTop - (ev.clientY - startY), behavior: 'instant' });
-        const nowT = performance.now();
-        const dt = nowT - velTrackT;
-        if(dt > 0) scrollVelocity = -((ev.clientY - velTrackY) / dt);
-        velTrackT = nowT;
-        velTrackY = ev.clientY;
+        velTracker.sample(ev.clientY);
       } else if(phase === 'longpress' && dist > 12){
         closeAllSceneMenus();
         phase = 'drag';
@@ -3234,7 +3464,7 @@
         jumpToCut(firstId);
         closeSidebar();
       } else if(wasScrolling && scroller){
-        let perFrame = scrollVelocity * 16.67;
+        let perFrame = -velTracker.release() * 16.67;
         const MAXV = 90;
         perFrame = Math.max(-MAXV, Math.min(MAXV, perFrame));
         if(Math.abs(perFrame) > 0.5){
