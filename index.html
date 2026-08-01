@@ -162,10 +162,34 @@
   .scene-row{ position:relative; touch-action:none; }
   .scene-row.dragging{ z-index:5; background:var(--bg-elevated-2); box-shadow:0 10px 24px rgba(0,0,0,.4); border-radius:11px; }
   .scene-item{ display:flex; flex-direction:column; align-items:flex-start; gap:2px; padding:10px 12px; border-radius:11px; width:100%; text-align:left; }
-  .scene-item:hover{ background:var(--bg-elevated-2); }
+  /* touch-action:none on .scene-row means WE drive scrolling manually (see
+     onSceneItemPointerDown) by re-positioning content under a mostly-stationary finger —
+     which is exactly what exposes iOS Safari's touch-to-mouse-event emulation: touching a
+     button fires a simulated :hover immediately (that's the initial gray flash on touchdown),
+     and it doesn't clear as the content scrolls past underneath; at touchend, a synthetic
+     mouseover fires for whatever row now happens to sit at the finger's on-screen position,
+     and since simulated :hover on iOS doesn't release until a *different* element is tapped,
+     that row is left stuck gray — reads as though the scroll snagged there. Scoping the rule
+     to real hover-capable pointers (mouse/trackpad) removes the touch-simulated version
+     entirely while keeping genuine hover for anyone using the app with a pointing device. */
+  @media (hover: hover) and (pointer: fine){
+    .scene-item:hover{ background:var(--bg-elevated-2); }
+  }
   .scene-item-num{ font-family:var(--font-mono); font-size:13px; color:var(--accent); font-weight:700; letter-spacing:.03em; }
   .scene-item-count{ font-size:11.5px; color:var(--text-dim); }
   .scene-row.menu-open .scene-item{ background:var(--bg-elevated-2); }
+  /* Select mode: room for the circle so it doesn't cover the shot-count text, and a tinted
+     background (reusing the same accent-soft treatment as an active project row) so a
+     fully-selected scene reads clearly at a glance while scrolling the list. */
+  .sidebar-list.scene-select-mode .scene-item{ padding-right:44px; }
+  .scene-row.scene-selected .scene-item{ background:var(--accent-soft); }
+  .scene-select-circle{ position:absolute; top:50%; right:12px; transform:translateY(-50%); }
+  /* Without this, the global button:active{transform:scale(.95)} rule (higher specificity —
+     it matches both the element and the pseudo-class) replaces our translateY(-50%) outright
+     instead of combining with it, so the circle's vertical-centering offset disappears on
+     press and it visibly jumps down by half its height. Same fix already used for
+     .project-delete-chip above, which centers the same way. */
+  .scene-select-circle:active{ transform:translateY(-50%) scale(.95); }
   .sidebar-empty{ padding:2px 12px 10px; color:var(--text-faint); font-size:12.5px; line-height:1.6; }
   .sidebar-footer{ padding:12px 18px calc(16px + env(safe-area-inset-bottom)); font-size:11px; color:var(--text-faint); line-height:1.55; border-top:1px solid var(--line); flex:0 0 auto; }
   .sidebar-hint{ margin:0 0 10px; }
@@ -338,6 +362,10 @@
   .select-circle.selected{ background:var(--accent); border-color:var(--accent); }
   .select-circle.selected svg{ opacity:1; }
   .tile-select-circle{ position:absolute; top:5px; left:5px; z-index:4; }
+  /* Sized to match .select-all-circle in the bottom select toolbar, not the per-shot 26px
+     circle it otherwise inherits .select-circle's styling from. */
+  .scene-select-circle{ width:20px; height:20px; }
+  .scene-select-circle svg{ width:11px; height:11px; }
   .delete-chip{
     display:none; position:absolute; left:50%; top:100%; transform:translateX(-50%); margin-top:4px;
     align-items:center; gap:5px; height:26px; padding:0 11px; z-index:5;
@@ -2999,6 +3027,7 @@
     selectedIds.clear();
     updateSelectButtonsUI();
     renderFilmstrip();
+    renderScenesList();
     updateSelectToolbar();
   }
   function exitSelectMode(){
@@ -3008,7 +3037,7 @@
   }
   function toggleSelectMode(){
     if(selectMode) exitSelectMode(); else enterSelectMode();
-    if(!selectMode) renderFilmstrip();
+    if(!selectMode){ renderFilmstrip(); renderScenesList(); }
   }
   function toggleCutSelection(id, circleEl){
     if(selectedIds.has(id)){ selectedIds.delete(id); circleEl.classList.remove('selected'); }
@@ -3021,6 +3050,35 @@
     circle.innerHTML = ICONS.check;
     circle.addEventListener('click', e => { e.stopPropagation(); toggleCutSelection(id, circle); });
     return circle;
+  }
+  /* Scene-row selection (sidebar): selects/deselects every shot in a scene at once, so a whole
+     scene can be picked for a batch action (Trash, Move to Scene, Delete) without hunting down
+     each of its shots individually in the filmstrip. */
+  function buildSceneSelectCircle(ids){
+    const allSelected = ids.length > 0 && ids.every(id => selectedIds.has(id));
+    const circle = document.createElement('button');
+    circle.className = 'select-circle scene-select-circle' + (allSelected ? ' selected' : '');
+    circle.innerHTML = ICONS.check;
+    circle.addEventListener('click', e => { e.stopPropagation(); toggleSceneSelection(ids, circle, circle.closest('.scene-row')); });
+    return circle;
+  }
+  function toggleSceneSelection(ids, circleEl, rowEl){
+    if(ids.length === 0) return;
+    const allSelected = ids.every(id => selectedIds.has(id));
+    if(allSelected) ids.forEach(id => selectedIds.delete(id));
+    else ids.forEach(id => selectedIds.add(id));
+    if(circleEl) circleEl.classList.toggle('selected', !allSelected);
+    if(rowEl) rowEl.classList.toggle('scene-selected', !allSelected);
+    /* Sync each affected shot's own select-circle directly instead of a full renderFilmstrip()
+       — cheap here, and avoids re-triggering the per-cut canvas setup cost (see Progress doc)
+       for every shot in the scene on every tap. */
+    ids.forEach(id => {
+      const cutCircle = filmstripEl.querySelector(
+        '.cut-unit[data-unit-id="' + id + '"] .select-circle, .tile[data-unit-id="' + id + '"] .select-circle'
+      );
+      if(cutCircle) cutCircle.classList.toggle('selected', !allSelected);
+    });
+    updateSelectToolbar();
   }
 
   /* ===================== Batch actions on selected cuts ===================== */
@@ -3388,8 +3446,14 @@
     return groups;
   }
 
+  function cutIdsForScene(sceneText){
+    return state.order.filter(id => (state.cuts[id].scene || '').trim() === sceneText);
+  }
+
   function renderScenesList(){
     const groups = computeSceneGroups();
+    const selectableHere = selectMode && appMode === 'main';
+    sidebarListEl.classList.toggle('scene-select-mode', selectableHere);
     sidebarListEl.innerHTML = '';
     if(groups.length === 0){
       const empty = document.createElement('div');
@@ -3409,7 +3473,20 @@
         '<span class="scene-item-count">' + g.count + (g.count === 1 ? ' shot' : ' shots') + '</span>';
       row.appendChild(item);
 
-      item.addEventListener('pointerdown', e => onSceneItemPointerDown(e, g.scene, g.firstId, item, row));
+      /* Scoped to main mode: while Trash has its own Select mode active, selectedIds means
+         trashed-shot ids there, not these (non-trashed) scene groups — mixing the two would
+         feed the wrong ids into Trash's batch actions. */
+      if(selectableHere){
+        const ids = cutIdsForScene(g.scene);
+        const circle = buildSceneSelectCircle(ids);
+        row.appendChild(circle);
+        if(ids.length > 0 && ids.every(id => selectedIds.has(id))) row.classList.add('scene-selected');
+        /* Tap anywhere on the row selects the whole scene — same "tap the card" convention as
+           cut selection in the filmstrip — not just the circle itself. */
+        item.addEventListener('click', () => toggleSceneSelection(ids, circle, row));
+      }
+
+      item.addEventListener('pointerdown', e => onSceneItemPointerDown(e, g.scene, g.firstId, item, row, { restrictedMode: selectableHere }));
       sidebarListEl.appendChild(row);
     });
   }
@@ -3486,7 +3563,8 @@
   }
 
   let sceneMomentumCancel = null;
-  function onSceneItemPointerDown(e, sceneText, firstId, itemEl, rowEl){
+  function onSceneItemPointerDown(e, sceneText, firstId, itemEl, rowEl, opts){
+    const restrictedMode = !!(opts && opts.restrictedMode);
     if(e.pointerType === 'mouse' && e.button !== 0) return;
     if(sceneMomentumCancel){ sceneMomentumCancel(); sceneMomentumCancel = null; }
     const pointerId = e.pointerId;
@@ -3497,7 +3575,9 @@
     const velTracker = createVelocityTracker(startY);
 
     const timer = setTimeout(() => {
-      if(phase !== 'idle') return;
+      /* Select mode: no long-press action sheet and no reorder-drag — a plain tap is the only
+         gesture here, handled by the item's own .click listener (toggles the whole scene). */
+      if(phase !== 'idle' || restrictedMode) return;
       phase = 'longpress';
       closeAllSceneMenus();
       rowEl.classList.add('menu-open');
@@ -3535,9 +3615,15 @@
       const wasScrolling = phase === 'scrolling';
       cleanup();
       if(wasIdle){
-        if(appMode === 'trash') exitTrashModeToMain();
-        jumpToCut(firstId);
-        closeSidebar();
+        if(restrictedMode){
+          /* Select mode: let the native click event bubble to the item's own .click listener
+             (toggles selection for the whole scene) instead of navigating away and closing
+             the sidebar — same convention as tile-view's restrictedMode tap handling. */
+        } else {
+          if(appMode === 'trash') exitTrashModeToMain();
+          jumpToCut(firstId);
+          closeSidebar();
+        }
       } else if(wasScrolling && scroller){
         let perFrame = -velTracker.release() * 16.67;
         const MAXV = 90;
