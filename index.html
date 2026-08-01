@@ -1286,6 +1286,8 @@
      inside the resize handler itself — by then the old layout is already gone. */
   let lastViewedCutId = null;
   let scrollTrackRaf = null;
+  let jumpScrollSuppressed = false;
+  let jumpScrollSuppressTimer = null;
   /* Tracks the viewport size as of the last time we knew it was settled (i.e. not mid-rotation).
      The 'resize' handler below updates this the instant it runs — but the axis-flip side effect
      (landscape's scrollLeft vs portrait's scrollTop both reset to 0 when the grid direction
@@ -1299,6 +1301,15 @@
      a real user scroll, and is ignored here. */
   let lastSettledW = window.innerWidth, lastSettledH = window.innerHeight;
   filmstripEl.addEventListener('scroll', () => {
+    if(jumpScrollSuppressed){
+      /* Keep pushing the "settled" timer out on every scroll event; once movement genuinely
+         stops (no more events for 150ms), this clears and tracking resumes normally. Adapts
+         automatically to however long the jump's smooth-scroll animation actually takes for
+         its distance, rather than guessing a fixed duration. */
+      clearTimeout(jumpScrollSuppressTimer);
+      jumpScrollSuppressTimer = setTimeout(() => { jumpScrollSuppressed = false; }, 150);
+      return;
+    }
     if(scrollTrackRaf) return;
     scrollTrackRaf = requestAnimationFrame(() => {
       scrollTrackRaf = null;
@@ -1336,7 +1347,7 @@
     const wasEditing = editMode;
     editMode = on;
     const anchorId = findCenteredCutId();
-    document.body.classList.toggle('view-mode', !editMode);
+    document.body.classList.toggle('view-mode', !editMode || appMode === 'trash');
     editToggleBtn.textContent = editMode ? 'Done' : 'Edit';
     editToggleBtn.classList.toggle('active', editMode);
     if(!editMode && editorModal.classList.contains('open')){
@@ -1527,6 +1538,13 @@
   /* ===================== Rendering: filmstrip ===================== */
   function renderFilmstrip(){
     const isTrash = appMode === 'trash';
+    /* Trash always uses the full-width "view mode" card layout (see body.view-mode CSS rules),
+       regardless of whatever Edit/Done state was active before entering it — editing doesn't
+       apply to Trash items anyway (contentEditable/readOnly are already forced off there), so
+       the padded Edit-mode layout showing through was just a leftover CSS state, not intended.
+       Recomputing here (rather than only in setEditMode's own toggle) catches every path that
+       transitions in or out of Trash, since all of them render the filmstrip afterward. */
+    document.body.classList.toggle('view-mode', !editMode || isTrash);
     filmstripEl.classList.toggle('tile-mode', viewMode === 'tile');
     openMenuUnitId = null;
     filmstripEl.innerHTML = '';
@@ -1615,9 +1633,15 @@
         if(e.target.closest('.tile-select-circle')) return;
         toggleCutSelection(cut.id, circle);
       });
-    } else if(!isTrash){
-      tile.addEventListener('pointerdown', e => onTilePointerDown(e, cut.id, tile));
     }
+    /* Always wire up pointerdown — even in Select mode and in Trash — purely so manual
+       scrolling still works. .tile has touch-action:none (needed elsewhere for long-press-to-
+       reorder), which also fully blocks native scroll; without this, Select mode and Trash
+       tiles had no way to scroll at all. onTilePointerDown itself disables the drag-reorder
+       phase and its own tap-to-open action for both those cases (restrictedMode below) — in
+       Select mode, tap-to-toggle is handled by the .click listener above instead; in Trash,
+       tap continues to do nothing, same as before this fix. */
+    tile.addEventListener('pointerdown', e => onTilePointerDown(e, cut.id, tile, { restrictedMode: selectMode || isTrash }));
     return tile;
   }
 
@@ -1776,7 +1800,8 @@
   }
 
   let tileMomentumCancel = null;
-  function onTilePointerDown(e, id, tileEl){
+  function onTilePointerDown(e, id, tileEl, opts){
+    const restrictedMode = !!(opts && opts.restrictedMode);
     if(e.pointerType === 'mouse' && e.button !== 0) return;
     if(tileMomentumCancel){ tileMomentumCancel(); tileMomentumCancel = null; }
     const pointerId = e.pointerId;
@@ -1787,7 +1812,7 @@
     const velTracker = createVelocityTracker(portrait ? startY : startX);
 
     const timer = setTimeout(() => {
-      if(phase !== 'idle' || !editMode) return;
+      if(phase !== 'idle' || !editMode || restrictedMode) return;
       phase = 'drag';
       beginDrag();
     }, 260);
@@ -1820,7 +1845,11 @@
       const wasScrolling = phase === 'scrolling';
       cleanupPre();
       if(wasIdle){
-        if(editMode){
+        if(restrictedMode){
+          /* Select mode: let the native click event bubble to the tile's own .click listener
+             (toggles selection) instead. Trash: tap intentionally does nothing, same as before
+             this fix — this handler exists here purely to enable scrolling. */
+        } else if(editMode){
           openEditor(id);
         } else {
           setViewMode('basic');
@@ -2530,33 +2559,68 @@
      card (no old rect to slide from) simply fades into the gap that opened up for it. */
   function playInsertShiftAnimation(oldRects, newId){
     const DURATION = 620;
-    filmstripEl.querySelectorAll('.cut-unit[data-unit-id]').forEach(el => {
+    const els = filmstripEl.querySelectorAll('.cut-unit[data-unit-id]');
+    const portrait = isPortrait();
+    const contRect = filmstripEl.getBoundingClientRect();
+    const BUFFER = 600; // px beyond the visible edge to still animate, for smooth continuity
+    const viewMin = (portrait ? contRect.top : contRect.left) - BUFFER;
+    const viewMax = (portrait ? contRect.bottom : contRect.right) + BUFFER;
+
+    /* READ PHASE: gather every element's new rect before touching any styles. The previous
+       version read + wrote + forced a reflow (`void el.offsetWidth`) for one element at a time
+       inside a single loop — interleaving reads and writes like that is textbook layout
+       thrashing: each element's forced reflow invalidates the layout cache the *next*
+       element's getBoundingClientRect() would otherwise reuse, so cost scaled up sharply with
+       element count. Splitting into a read pass, then a write pass, then a *single* forced
+       reflow for the whole batch fixes that regardless of how many cards are shifting.
+       Separately: cards whose old *and* new position both sit well outside the viewport are
+       skipped from the animation entirely — nobody can see them move either way, so spending
+       transform/transition/compositor work on them just steals frame budget from the cards
+       actually on screen. That combination is what made inserting near the start of a large
+       (100+ shot) project specifically janky for the *visible* cards near the insertion point
+       — most of the "shifting" work was being wasted animating an off-screen tail nobody could
+       see, while inserting near the end never had that off-screen tail to begin with. */
+    const moves = [];
+    let newEl = null;
+    els.forEach(el => {
       const id = el.dataset.unitId;
-      if(id === newId){
-        el.style.transition = 'none';
-        el.style.opacity = '0';
-        void el.offsetWidth;
-        requestAnimationFrame(() => requestAnimationFrame(() => {
-          el.style.transition = 'opacity ' + DURATION + 'ms ease';
-          el.style.opacity = '';
-        }));
-        setTimeout(() => { el.style.transition = ''; el.style.opacity = ''; }, DURATION + 20);
-        return;
-      }
+      if(id === newId){ newEl = el; return; }
       const oldRect = oldRects[id];
       if(!oldRect) return;
       const newRect = el.getBoundingClientRect();
       const dx = oldRect.left - newRect.left, dy = oldRect.top - newRect.top;
       if(!dx && !dy) return;
-      el.style.transition = 'none';
-      el.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
-      void el.offsetWidth;
-      requestAnimationFrame(() => requestAnimationFrame(() => {
-        el.style.transition = 'transform ' + DURATION + 'ms cubic-bezier(.32,.72,0,1)';
-        el.style.transform = '';
-      }));
-      setTimeout(() => { el.style.transition = ''; el.style.transform = ''; }, DURATION + 20);
+      const oldPos = portrait ? oldRect.top : oldRect.left;
+      const newPos = portrait ? newRect.top : newRect.left;
+      if((oldPos < viewMin || oldPos > viewMax) && (newPos < viewMin || newPos > viewMax)) return;
+      moves.push({ el, dx, dy });
     });
+
+    // WRITE PHASE: apply every "from" state in one batch.
+    moves.forEach(m => {
+      m.el.style.transition = 'none';
+      m.el.style.transform = 'translate(' + m.dx + 'px,' + m.dy + 'px)';
+    });
+    if(newEl){
+      newEl.style.transition = 'none';
+      newEl.style.opacity = '0';
+    }
+    if(moves.length || newEl) void filmstripEl.offsetWidth; // one forced reflow for the whole batch
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      moves.forEach(m => {
+        m.el.style.transition = 'transform ' + DURATION + 'ms cubic-bezier(.32,.72,0,1)';
+        m.el.style.transform = '';
+      });
+      if(newEl){
+        newEl.style.transition = 'opacity ' + DURATION + 'ms ease';
+        newEl.style.opacity = '';
+      }
+    }));
+    setTimeout(() => {
+      moves.forEach(m => { m.el.style.transition = ''; m.el.style.transform = ''; });
+      if(newEl){ newEl.style.transition = ''; newEl.style.opacity = ''; }
+    }, DURATION + 20);
   }
   function insertCut(index){
     if(!editMode || appMode === 'trash') return;
@@ -2598,6 +2662,17 @@
     const unit = filmstripEl.querySelector('.cut-unit[data-unit-id="' + id + '"], .tile[data-unit-id="' + id + '"]');
     if(unit){
       const portrait = isPortrait();
+      /* A nav-button jump can cover the whole list's scroll distance on a large project,
+         producing many scroll events over a second or more. The scroll tracker above
+         (findCenteredCutId) is O(shot count) per call, so letting it run on every one of
+         those events adds real main-thread contention during exactly the window when the
+         animation needs to stay smooth — on large projects (100+ shots) this was severe
+         enough to visibly stall rendering. Suppress that tracking for the jump; we already
+         know the destination, so set lastViewedCutId directly instead of waiting for the
+         tracker to (re)discover it once scrolling settles. */
+      jumpScrollSuppressed = true;
+      clearTimeout(jumpScrollSuppressTimer);
+      lastViewedCutId = id;
       unit.scrollIntoView({ behavior: 'smooth', inline: portrait ? 'nearest' : 'center', block: portrait ? 'center' : 'nearest' });
       requestAnimationFrame(() => flashUnit(id));
     }
