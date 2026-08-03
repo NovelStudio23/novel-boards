@@ -33,6 +33,12 @@
     --font-display: 'Avenir Next', 'Helvetica Neue', Arial, sans-serif;
     --font-body: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
     --font-mono: 'SF Mono', Menlo, ui-monospace, Consolas, monospace;
+    /* Kept in sync with the actual rendered height of #selectToolbar (see
+       updateSelectToolbarSpacing) so the filmstrip's scrollable area and the nav buttons can
+       reserve exactly enough room to clear it in Select mode — see the select-mode overrides
+       near .filmstrip / .nav-buttons below. Safe default before JS runs (or if select mode is
+       never entered) is 0, matching the toolbar being off-screen. */
+    --select-toolbar-h: 0px;
   }
 
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
@@ -216,6 +222,15 @@
   .nav-buttons{
     position:fixed; right:calc(16px + env(safe-area-inset-right)); bottom:calc(16px + env(safe-area-inset-bottom));
     z-index:20; display:flex; flex-direction:column; gap:10px;
+    transition:bottom .28s cubic-bezier(.32,.72,0,1);
+  }
+  /* Select mode's bottom toolbar sits at z-index 120, well above the nav buttons (20) — without
+     this, it would visually bury them under it any time both are on-screen together. Shifting
+     the buttons up by the toolbar's actual measured height (--select-toolbar-h, kept current by
+     updateSelectToolbarSpacing) keeps them fully clear of it. Portrait only — landscape keeps
+     its original behavior unchanged. */
+  @media (orientation: portrait){
+    body.select-mode .nav-buttons{ bottom:calc(16px + env(safe-area-inset-bottom) + var(--select-toolbar-h)); }
   }
   @media (orientation: landscape){ .nav-buttons{ flex-direction:row; } }
   .nav-buttons.hidden{ display:none; }
@@ -249,8 +264,14 @@
   }
   body.view-mode .filmstrip{ padding:0; box-shadow:none; }
 
+  /* Select mode is edit-mode-only (see selectBtn), so this never has to coexist with
+     body.view-mode's padding:0 above — the base edit-mode padding always applies here first,
+     and this just adds the toolbar's live-measured height on top of its existing bottom edge,
+     so the last card/row can scroll fully clear of the toolbar instead of ending up hidden
+     underneath it. Portrait only — landscape keeps its original behavior unchanged. */
   @media (orientation: portrait){
     .filmstrip{ flex-direction:column; overflow-x:hidden; overflow-y:auto; touch-action:pan-y; padding:14px 12px 20px; }
+    body.select-mode .filmstrip{ padding-bottom: calc(20px + var(--select-toolbar-h)); }
   }
 
   .filmstrip.tile-mode{
@@ -264,6 +285,7 @@
       grid-auto-rows:100px;
       overflow-x:hidden; overflow-y:auto; align-content:start; justify-content:center;
     }
+    body.select-mode .filmstrip.tile-mode{ padding-bottom: calc(16px + var(--select-toolbar-h)); }
   }
   .tile{
     width:185px; aspect-ratio:1.85; position:relative; flex:0 0 auto;
@@ -974,6 +996,18 @@
 
   function uid(prefix){ return (prefix||'c') + Math.random().toString(36).slice(2, 9); }
 
+  /* Default starter content for a brand-new project: 10 blank shots in a single scene. Shared
+     by ensureProjectLoaded (an existing project whose storage turned out empty) and
+     createNewProject (an explicit new project) — both mutate a freshly-initialized {order,
+     cuts} data object the same way before persisting it. */
+  function addDefaultStarterCuts(data){
+    for(let i = 0; i < 10; i++){
+      const cid = uid('c');
+      data.cuts[cid] = { id: cid, scene: 'S#1', notes: '', image: null };
+      data.order.push(cid);
+    }
+  }
+
   function escapeHtml(s){
     return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   }
@@ -1112,11 +1146,7 @@
     data.order = data.order.filter(cid => data.cuts[cid]);
     data.trashOrder = data.trashOrder.filter(cid => data.cuts[cid]);
     if(data.order.length === 0 && data.trashOrder.length === 0){
-      for(let i = 0; i < 10; i++){
-        const cid = uid('c');
-        data.cuts[cid] = { id: cid, scene: 'S#1', notes: '', image: null };
-        data.order.push(cid);
-      }
+      addDefaultStarterCuts(data);
       saveOrderFor(id, data.order);
       data.order.forEach(cid => saveCutFor(id, cid, data.cuts[cid]));
     }
@@ -1227,6 +1257,20 @@
   const navButtonsEl = document.getElementById('navButtons');
   const navFirstBtn = document.getElementById('navFirstBtn');
   const navLastBtn = document.getElementById('navLastBtn');
+  const selectToolbarEl = document.getElementById('selectToolbar');
+
+  /* ===================== Select toolbar spacing ===================== */
+  /* Keeps --select-toolbar-h (see :root) in sync with the toolbar's actual rendered height, so
+     the filmstrip's bottom padding and the nav buttons' bottom offset (both in CSS, scoped to
+     body.select-mode) can reserve exactly enough room to clear it — rather than a guessed fixed
+     px value that could be wrong once env(safe-area-inset-bottom) or the toolbar's content
+     width changes. offsetHeight is measured off the toolbar's real layout box, which doesn't
+     depend on its slide-up transform (transforms don't affect layout), so this is safe to call
+     regardless of whether the toolbar is currently visible on screen. */
+  function updateSelectToolbarSpacing(){
+    document.documentElement.style.setProperty('--select-toolbar-h', selectToolbarEl.offsetHeight + 'px');
+  }
+  updateSelectToolbarSpacing();
 
   /* ===================== First/last shot navigation buttons ===================== */
   /* Icons swap between up/down and left/right based on orientation, but which physical
@@ -1253,6 +1297,7 @@
   });
   updateNavButtonsOrientation();
   window.addEventListener('resize', updateNavButtonsOrientation, { passive: true });
+  window.addEventListener('resize', updateSelectToolbarSpacing, { passive: true });
 
   /* ===================== Sidebar open/close ===================== */
   function openSidebar(){ sidebarEl.classList.add('open'); backdropEl.classList.add('show'); }
@@ -1382,7 +1427,7 @@
       closeEditor(true);
     }
     if(!editMode) closeNotesExpand();
-    if(!editMode && selectMode){ exitSelectMode(); renderFilmstrip(); }
+    if(!editMode && selectMode){ exitSelectMode(); renderFilmstrip(); renderScenesList(); }
     if(wasEditing && !editMode) applySceneReordering();
     if(anchorId) restoreScrollToCut(anchorId);
     updateSelectButtonVisibility();
@@ -1512,29 +1557,10 @@
     if(curNum !== null){
       newN = curNum + 1;
       insertAfterScene = visibleScene;
-      /* Shift every existing scene numbered >= newN up by one to make room. Build the
-         old-text -> new-text mapping first (like applySceneRenumbering does) so renaming
-         is based on original text, not on values already mutated earlier in the loop —
-         renaming in-place in ascending order would let a shifted scene collide with the
-         next one before it gets its turn. */
-      const groups = computeSceneGroups();
-      const mapping = new Map();
-      groups.forEach(g => {
-        const n = parseSceneNumber(g.scene);
-        if(n !== null && n >= newN) mapping.set(g.scene, renumberScene(g.scene, n + 1));
-      });
-      if(mapping.size > 0){
-        state.order.forEach(id => {
-          const cur = (state.cuts[id].scene || '').trim();
-          if(mapping.has(cur)){
-            const newText = mapping.get(cur);
-            if(newText !== cur){
-              state.cuts[id].scene = newText;
-              saveCut(id);
-            }
-          }
-        });
-      }
+      /* Shift every existing scene numbered >= newN up by one to make room, based on each
+         scene's original text rather than values already mutated earlier in the same pass —
+         see computeSceneShiftMapping/applySceneShiftMapping. */
+      applySceneShiftMapping(computeSceneShiftMapping(newN));
     } else {
       newN = getNextSceneNumber();
     }
@@ -1777,6 +1803,18 @@
     };
   }
 
+  /* Converts a released drag's velocity (px/ms, from a velocity tracker's release()) into the
+     px/frame value startMomentumScroll expects — assumes ~60fps (16.67ms/frame), flips the
+     sign since scroll direction is opposite to raw pointer-movement direction, and clamps to a
+     sane max so one unusually fast flick can't send the scroll flying. Returns null when the
+     release was too slow to be worth any momentum at all, so callers can skip starting one. */
+  function velocityToPerFrame(velTracker){
+    const MAX_PER_FRAME = 90;
+    let perFrame = -velTracker.release() * 16.67;
+    perFrame = Math.max(-MAX_PER_FRAME, Math.min(MAX_PER_FRAME, perFrame));
+    return Math.abs(perFrame) > 0.5 ? perFrame : null;
+  }
+
 
   /* Manual momentum/inertia scroll for surfaces that use touch-action:none (tiles, sidebar
      scene list) — native momentum never kicks in on those since the browser's own pan is
@@ -1785,42 +1823,71 @@
      always via explicit instant scrollTo (4.7) — never smooth. Returns a cancel function so a
      fresh touch-down (or a tool/mode change) can stop it instantly, same as a real flick would.
 
-     On a short list (few scenes in the sidebar, few shots in a small project) the un-cushioned
-     version could reach the top/bottom edge within just 2-3 frames even while friction was
-     technically being applied every frame — with that little travel distance, a human can't
-     perceptually tell the difference between "decelerating" and "instantly slamming into the
-     wall", so it read as if momentum wasn't decelerating at all. Real iOS doesn't have this
-     problem because it rubber-bands (a soft overscroll-and-spring-back) rather than hard
-     -clamping at the edge; CUSHION below approximates that same softened landing — velocity
-     gets progressively damped once within CUSHION px of a boundary, proportional to how close
-     it is — without needing a full overscroll/bounce-back animation. Native-scroll surfaces
-     (Normal View's card list) don't need any of this, since real -webkit-overflow-scrolling
-     already rubber-bands on its own. */
+     An earlier variant pre-damped velocity within a fixed distance of each edge (a "cushion"),
+     meant to avoid an abrupt hard-wall stop on short lists. That damping only approaches the
+     edge asymptotically, so a flick with any speed left on entering it would decay below the
+     stop threshold before actually reaching the edge — leaving the scroll stalled short of the
+     true boundary on longer lists. Reverted in favor of this: no pre-damping — friction alone
+     carries it at full speed right up to the true edge — and once it lands there with enough
+     speed to have been a real flick, a short recoil pulse dips a little back in from the edge
+     and springs back out to it. (Not a true past-the-edge rubber-band — scrollTop/scrollLeft
+     are always clamped by the browser to [0, max], so visually overshooting past the content's
+     own edge would need a separate transform on an inner content wrapper, which these
+     containers don't have; dipping inward instead stays entirely within valid scroll
+     positions.) A gentle scroll that merely reaches the edge with little speed left just
+     clamps there — no bounce motion is needed to communicate reaching the end. */
   function startMomentumScroll(container, axis, initialVelocityPerFrame){
     const FRICTION = 0.945;
     const MIN_VELOCITY = 0.4;
-    const CUSHION = 70; // px -- distance from an edge where extra damping kicks in
+    const BOUNCE_MIN_VELOCITY = 2;   // px/frame -- below this, landing on an edge just clamps, no bounce
+    const BOUNCE_MAX = 24;           // px -- cap on how far the recoil dips back in from the edge
+    const BOUNCE_SCALE = 1.4;        // recoil depth grows with remaining speed at contact, up to BOUNCE_MAX
+    const BOUNCE_MS = 220;           // duration of the dip-and-settle pulse
     let vel = initialVelocityPerFrame;
     let rafId = null;
+
+    function get(){ return axis === 'y' ? container.scrollTop : container.scrollLeft; }
+    function set(v){
+      if(axis === 'y') container.scrollTo({ top: v, behavior: 'instant' });
+      else container.scrollTo({ left: v, behavior: 'instant' });
+    }
+    function bounds(){
+      return axis === 'y'
+        ? container.scrollHeight - container.clientHeight
+        : container.scrollWidth - container.clientWidth;
+    }
+
+    /* scrollTop/scrollLeft are always browser-clamped to [0, max] — there's no way to actually
+       scroll past the content's own edge. So instead of pushing past the edge, dip back IN from
+       it and spring back: position = edge - direction*recoil*sin(pi*t) over t in [0,1], landing
+       exactly back at the edge — reads as a soft little bounce on contact while every value
+       stays validly on-screen. */
+    function bounce(edge, direction, speedAtEdge, max){
+      const recoil = Math.min(BOUNCE_MAX, Math.abs(speedAtEdge) * BOUNCE_SCALE);
+      const start = performance.now();
+      function frame(now){
+        const t = Math.min(1, (now - start) / BOUNCE_MS);
+        const raw = edge - direction * recoil * Math.sin(Math.PI * t);
+        set(Math.max(0, Math.min(max, raw)));
+        if(t >= 1){ set(edge); rafId = null; return; }
+        rafId = requestAnimationFrame(frame);
+      }
+      rafId = requestAnimationFrame(frame);
+    }
+
     function step(){
       vel *= FRICTION;
-      const max = axis === 'y' ? (container.scrollHeight - container.clientHeight) : (container.scrollWidth - container.clientWidth);
-      const current = axis === 'y' ? container.scrollTop : container.scrollLeft;
-      if(vel > 0){
-        const distToMax = max - current;
-        if(distToMax > 0 && distToMax < CUSHION) vel *= (distToMax / CUSHION);
-      } else if(vel < 0){
-        const distToMin = current;
-        if(distToMin > 0 && distToMin < CUSHION) vel *= (distToMin / CUSHION);
+      const max = bounds();
+      const next = get() + vel;
+      if(next <= 0 || next >= max){
+        const edge = next <= 0 ? 0 : max;
+        const direction = next <= 0 ? -1 : 1;
+        if(Math.abs(vel) >= BOUNCE_MIN_VELOCITY) bounce(edge, direction, vel, max);
+        else { set(edge); rafId = null; }
+        return;
       }
-      let next = current + vel;
-      let stop = false;
-      if(next <= 0){ next = 0; stop = true; }
-      else if(next >= max){ next = max; stop = true; }
-      if(Math.abs(vel) < MIN_VELOCITY) stop = true;
-      if(axis === 'y') container.scrollTo({ top: next, behavior: 'instant' });
-      else container.scrollTo({ left: next, behavior: 'instant' });
-      if(stop){ rafId = null; return; }
+      if(Math.abs(vel) < MIN_VELOCITY){ set(next); rafId = null; return; }
+      set(next);
       rafId = requestAnimationFrame(step);
     }
     rafId = requestAnimationFrame(step);
@@ -1884,10 +1951,8 @@
           requestAnimationFrame(() => jumpToCut(id));
         }
       } else if(wasScrolling){
-        let perFrame = -velTracker.release() * 16.67;
-        const MAXV = 90;
-        perFrame = Math.max(-MAXV, Math.min(MAXV, perFrame));
-        if(Math.abs(perFrame) > 0.5){
+        const perFrame = velocityToPerFrame(velTracker);
+        if(perFrame !== null){
           tileMomentumCancel = startMomentumScroll(filmstripEl, portrait ? 'y' : 'x', perFrame);
         }
       }
@@ -3029,6 +3094,7 @@
     renderFilmstrip();
     renderScenesList();
     updateSelectToolbar();
+    updateSelectToolbarSpacing();
   }
   function exitSelectMode(){
     selectMode = false;
@@ -3148,18 +3214,7 @@
     let newN;
     if(position === 'start'){
       newN = 1;
-      const groups = computeSceneGroups();
-      const mapping = new Map();
-      groups.forEach(g => { const n = parseSceneNumber(g.scene); if(n !== null) mapping.set(g.scene, renumberScene(g.scene, n + 1)); });
-      if(mapping.size > 0){
-        state.order.forEach(id => {
-          const cur = (state.cuts[id].scene || '').trim();
-          if(mapping.has(cur)){
-            const nt = mapping.get(cur);
-            if(nt !== cur){ state.cuts[id].scene = nt; saveCut(id); }
-          }
-        });
-      }
+      applySceneShiftMapping(computeSceneShiftMapping(newN));
     } else {
       newN = getNextSceneNumber();
     }
@@ -3177,18 +3232,7 @@
     ids.forEach(id => { const idx = state.trashOrder.indexOf(id); if(idx !== -1) state.trashOrder.splice(idx, 1); });
 
     const newN = curNum + 1;
-    const groups = computeSceneGroups();
-    const mapping = new Map();
-    groups.forEach(g => { const n = parseSceneNumber(g.scene); if(n !== null && n >= newN) mapping.set(g.scene, renumberScene(g.scene, n + 1)); });
-    if(mapping.size > 0){
-      state.order.forEach(id => {
-        const cur = (state.cuts[id].scene || '').trim();
-        if(mapping.has(cur)){
-          const nt = mapping.get(cur);
-          if(nt !== cur){ state.cuts[id].scene = nt; saveCut(id); }
-        }
-      });
-    }
+    applySceneShiftMapping(computeSceneShiftMapping(newN));
     const sceneLabel = 'S#' + newN;
     ids.forEach(id => {
       state.cuts[id].scene = sceneLabel;
@@ -3222,6 +3266,12 @@
     });
     saveOrder();
     saveTrashOrder();
+    /* Deleting from the main list (not Trash) changes scene structure the same way trashing
+       does, so it needs the same renumbering pass — e.g. deleting every shot in S#2 should
+       collapse S#3, S#4... down to S#2, S#3... with no gap. Deleting from Trash instead (ids
+       already absent from state.order) makes this a harmless no-op, since Trash's frozen
+       scene/shot numbers are intentionally never renumbered — see moveCutToTrash. */
+    renumberAllScenesSequentially();
     await Promise.all(ids.map(id => storDelete('project:' + currentProjectId + ':cut:' + id)));
     exitSelectMode();
     renderFilmstrip();
@@ -3540,6 +3590,32 @@
     return oldText.replace(/\d+/, String(newNumber));
   }
 
+  /* Shared by every "make room for a scene at position N" operation (inserting a scene via
+     +Scene, putting a trashed scene back at the very start, putting one back right after a
+     given scene): every existing scene numbered >= minNumber needs to shift up by one first.
+     Kept as two small steps (compute the mapping, then apply it) rather than one combined
+     function since a caller occasionally needs the mapping's size before deciding whether
+     there's anything to shift at all. */
+  function computeSceneShiftMapping(minNumber){
+    const groups = computeSceneGroups();
+    const mapping = new Map();
+    groups.forEach(g => {
+      const n = parseSceneNumber(g.scene);
+      if(n !== null && n >= minNumber) mapping.set(g.scene, renumberScene(g.scene, n + 1));
+    });
+    return mapping;
+  }
+  function applySceneShiftMapping(mapping){
+    if(mapping.size === 0) return;
+    state.order.forEach(id => {
+      const cur = (state.cuts[id].scene || '').trim();
+      if(mapping.has(cur)){
+        const newText = mapping.get(cur);
+        if(newText !== cur){ state.cuts[id].scene = newText; saveCut(id); }
+      }
+    });
+  }
+
   function applySceneRenumbering(orderedSceneTexts){
     const mapping = new Map();
     orderedSceneTexts.forEach((oldText, i) => mapping.set(oldText, renumberScene(oldText, i + 1)));
@@ -3625,10 +3701,8 @@
           closeSidebar();
         }
       } else if(wasScrolling && scroller){
-        let perFrame = -velTracker.release() * 16.67;
-        const MAXV = 90;
-        perFrame = Math.max(-MAXV, Math.min(MAXV, perFrame));
-        if(Math.abs(perFrame) > 0.5){
+        const perFrame = velocityToPerFrame(velTracker);
+        if(perFrame !== null){
           sceneMomentumCancel = startMomentumScroll(scroller, 'y', perFrame);
         }
       }
@@ -3898,11 +3972,7 @@
     projects.push({ id, title: 'Untitled Storyboard', createdAt: now, updatedAt: now });
     saveProjectsIndex();
     const data = { title: 'Untitled Storyboard', order: [], trashOrder: [], cuts: {} };
-    for(let i = 0; i < 10; i++){
-      const cid = uid('c');
-      data.cuts[cid] = { id: cid, scene: 'S#1', notes: '', image: null };
-      data.order.push(cid);
-    }
+    addDefaultStarterCuts(data);
     projectDataCache[id] = data;
     saveOrderFor(id, data.order);
     data.order.forEach(cid => saveCutFor(id, cid, data.cuts[cid]));
