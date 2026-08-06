@@ -70,6 +70,7 @@
     width:38px; height:38px; border-radius:11px; flex:0 0 auto;
     display:flex; align-items:center; justify-content:center;
     background:transparent; color:var(--text); border:1px solid transparent;
+    touch-action:none; -webkit-touch-callout:none;
   }
   .icon-btn:hover{ background:var(--bg-elevated-2); }
   .icon-btn svg{ width:19px; height:19px; }
@@ -553,25 +554,45 @@
   }
   .sel-handle-rotate{ left:50%; top:0; margin:0; transform:translate(-50%,-33px); }
 
+  /* touch-action:none below, on the toolbar and every one of its controls, is what reliably
+     stops the OS's own Scribble (handwriting-to-text) gesture recognizer from claiming an Apple
+     Pencil touch that starts here — with the default touch-action:auto, WebKit can hand a
+     pencil-down off to Scribble instead of the page, swallowing the tap and writing text
+     instead of pressing the button. The tradeoff: touch-action:none also kills the toolbar's
+     own native horizontal scroll (overflow-x:auto stops responding to touch/pencil drags once
+     touch-action says "no native gesture handling at all here"). So scrolling is reimplemented
+     manually in JS below (setupToolbarScroll), the same touch-action:none + manual pointer-
+     driven scroll (with the shared momentum helper) already used for tiles and the sidebar scene
+     list — see the comment on startMomentumScroll for why that pattern exists. */
   .editor-toolbar{
     flex:0 0 auto; display:flex; align-items:center; gap:9px;
     padding:10px 14px max(12px, env(safe-area-inset-bottom));
     overflow-x:auto; background:rgba(255,255,255,.03); border-top:1px solid var(--line);
+    touch-action:none; -webkit-touch-callout:none;
   }
   .tool-divider{ width:1px; align-self:stretch; margin:4px 3px; background:var(--line-strong); flex:0 0 auto; }
-  .tool-btn{ width:38px; height:38px; border-radius:10px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; color:var(--text-dim); border:1px solid transparent; }
+  .tool-btn{ width:38px; height:38px; border-radius:10px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; color:var(--text-dim); border:1px solid transparent; touch-action:none; -webkit-touch-callout:none; }
   .tool-btn svg{ width:19px; height:19px; }
   .tool-btn.active{ background:var(--accent-soft); color:var(--accent); border-color:var(--accent-dim); }
-  .eraser-type-toggle{ display:flex; gap:2px; background:var(--bg-elevated-2); border-radius:9px; padding:2px; flex:0 0 auto; border:1px solid transparent; }
+  .pen-input-toggle{ display:flex; gap:2px; background:var(--bg-elevated-2); border-radius:9px; padding:2px; flex:0 0 auto; border:1px solid transparent; touch-action:none; -webkit-touch-callout:none; }
+  .pen-input-toggle.tool-active{ border-color:var(--accent-dim); }
+  .pen-input-btn{ width:32px; height:32px; border-radius:7px; display:flex; align-items:center; justify-content:center; padding:0; color:var(--text-dim); touch-action:none; -webkit-touch-callout:none; }
+  .pen-input-btn svg{ width:17px; height:17px; }
+  .pen-input-btn.active{ background:var(--bg-elevated); color:var(--accent); }
+  .eraser-type-toggle{ display:flex; gap:2px; background:var(--bg-elevated-2); border-radius:9px; padding:2px; flex:0 0 auto; border:1px solid transparent; touch-action:none; -webkit-touch-callout:none; }
   .eraser-type-toggle.tool-active{ border-color:var(--accent-dim); }
-  .eraser-icon-btn{ width:30px; height:30px; display:flex; align-items:center; justify-content:center; padding:0; color:var(--text-dim); }
-  .eraser-icon-btn svg{ width:16px; height:16px; }
-  .eraser-type-btn{ padding:7px 9px; border-radius:7px; font-size:10.5px; font-weight:700; color:var(--text-dim); white-space:nowrap; }
+  .eraser-icon-btn{ width:32px; height:32px; display:flex; align-items:center; justify-content:center; padding:0; color:var(--text-dim); touch-action:none; -webkit-touch-callout:none; }
+  .eraser-icon-btn svg{ width:17px; height:17px; }
+  .eraser-type-btn{ height:32px; padding:0 9px; border-radius:7px; font-size:10.5px; font-weight:700; color:var(--text-dim); white-space:nowrap; display:flex; align-items:center; justify-content:center; touch-action:none; -webkit-touch-callout:none; }
+  /* The icon button carries both classes (class="eraser-type-btn eraser-icon-btn"); this
+     compound selector outranks the single-class rules above on specificity alone, regardless of
+     source order, so its width/padding reliably win over .eraser-type-btn's text-button padding. */
+  .eraser-type-btn.eraser-icon-btn{ width:32px; padding:0; }
   .eraser-type-btn.active{ background:var(--bg-elevated); color:var(--accent); }
   .eraser-icon-btn.active{ background:transparent; color:var(--text-dim); }
-  .color-swatch{ width:26px; height:26px; border-radius:50%; flex:0 0 auto; background:var(--sw); border:2px solid rgba(255,255,255,.22); }
+  .color-swatch{ width:26px; height:26px; border-radius:50%; flex:0 0 auto; background:var(--sw); border:2px solid rgba(255,255,255,.22); touch-action:none; -webkit-touch-callout:none; }
   .color-swatch.active{ box-shadow:0 0 0 3px var(--bg-deep), 0 0 0 5px var(--sw); }
-  .size-dot{ width:30px; height:30px; border-radius:9px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; border:1px solid transparent; }
+  .size-dot{ width:30px; height:30px; border-radius:9px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; border:1px solid transparent; touch-action:none; -webkit-touch-callout:none; }
   .size-dot i{ display:block; border-radius:50%; background:var(--text); font-style:normal; }
   .size-dot[data-size="4"] i{ width:5px; height:5px; }
   .size-dot[data-size="8"] i{ width:9px; height:9px; }
@@ -579,7 +600,7 @@
   .size-dot[data-size="22"] i{ width:19px; height:19px; }
   .size-dot[data-size="32"] i{ width:24px; height:24px; }
   .size-dot.active{ background:var(--bg-elevated-2); border-color:var(--line-strong); }
-  .icon-btn.labeled{ width:auto; padding:0 13px; gap:6px; font-size:12.5px; font-weight:700; border:1px solid var(--line-strong); border-radius:19px; }
+  .icon-btn.labeled{ width:auto; padding:0 13px; gap:6px; font-size:12.5px; font-weight:700; border:1px solid var(--line-strong); border-radius:19px; touch-action:none; -webkit-touch-callout:none; }
   .icon-btn.labeled svg{ width:16px; height:16px; }
 
   /* ---------- Toast ---------- */
@@ -842,15 +863,27 @@
       </div>
       <div class="editor-empty-hint" id="editorEmptyHint">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z"/></svg>
-        <p>Draw with your finger or Pencil,<br>or paste a photo</p>
+        <p id="editorEmptyHintText">Draw with Apple Pencil,<br>or paste a photo</p>
       </div>
     </div>
   </div>
 
-  <div class="editor-toolbar">
-    <button class="tool-btn active" data-tool="pen" aria-label="Pen">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z"/></svg>
-    </button>
+  <div class="editor-toolbar" id="editorToolbar">
+    <div class="pen-input-toggle tool-active" id="penInputToggle">
+      <button class="pen-input-btn active" data-pen-input="pencil" aria-label="Pen — Apple Pencil only">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z"/></svg>
+      </button>
+      <button class="pen-input-btn" data-pen-input="finger" aria-label="Pen — finger drawing">
+        <svg viewBox="0 0 24 28" fill="currentColor" stroke="none">
+          <rect x="4" y="14" width="16" height="13.5" rx="6.5"/>
+          <rect x="6.4" y="6" width="3.1" height="11" rx="1.55"/>
+          <rect x="10.2" y="2.5" width="3.2" height="14.5" rx="1.6"/>
+          <rect x="14" y="5.3" width="3.1" height="11.7" rx="1.55"/>
+          <rect x="17.7" y="8.5" width="2.7" height="9" rx="1.35"/>
+          <rect x="-0.5" y="14.6" width="7.5" height="4.7" rx="2.35" transform="rotate(-32 7 17)"/>
+        </svg>
+      </button>
+    </div>
     <div class="eraser-type-toggle" id="eraserTypeToggle">
       <button class="eraser-type-btn eraser-icon-btn" data-eraser-type="object" aria-label="Eraser">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20H8l-5-5a2 2 0 0 1 0-2.8l9-9a2 2 0 0 1 2.8 0l5.2 5.2a2 2 0 0 1 0 2.8L13 18"/></svg>
@@ -989,8 +1022,6 @@
 
   const CANVAS_W = 1332, CANVAS_H = 720; /* 1.85:1 */
   const MIN_LINES = 10;
-  const INLINE_PEN_COLOR = '#221F1C';
-  const INLINE_PEN_SIZE = 7;
 
   const saveTimers = {};
 
@@ -4178,60 +4209,30 @@
       renderFrameCanvas(ctx, rec.baseImage, rec.strokes);
     }
 
-    let drawing = false, stroke = null;
+    /* Inline-canvas drawing has been removed entirely (neither finger nor Apple Pencil can draw
+       here anymore) — drawing only happens in the fullscreen editor now. This canvas now only
+       needs to detect a quick tap (any pointer type) to open that editor; anything that isn't a
+       clean tap (a drag, a scroll) is ignored so it doesn't fight with normal scrolling. */
     let tap = false, tapId = null, tapX = 0, tapY = 0, tapT = 0;
 
     canvas.addEventListener('pointerdown', e => {
       if(!editMode || appMode === 'trash') return;
       if(selectMode) return; /* let the tap bubble up as a click and toggle card selection instead */
-      if(e.pointerType === 'pen'){
-        e.preventDefault();
-        canvas.setPointerCapture(e.pointerId);
-        drawing = true;
-        hintEl.style.display = 'none';
-        const p = toLocalPoint(canvas, e);
-        stroke = { mode: 'pen', color: INLINE_PEN_COLOR, size: INLINE_PEN_SIZE, points: [p] };
-        rec.strokes.push(stroke);
-        renderFrameCanvas(ctx, rec.baseImage, rec.strokes);
-      } else {
-        tap = true; tapId = e.pointerId; tapX = e.clientX; tapY = e.clientY; tapT = Date.now();
-      }
+      tap = true; tapId = e.pointerId; tapX = e.clientX; tapY = e.clientY; tapT = Date.now();
     });
     canvas.addEventListener('pointermove', e => {
-      if(drawing && e.pointerType === 'pen'){
-        e.preventDefault();
-        const p = toLocalPoint(canvas, e);
-        stroke.points.push(p);
-        renderFrameCanvas(ctx, rec.baseImage, rec.strokes);
-      } else if(tap && e.pointerId === tapId){
+      if(tap && e.pointerId === tapId){
         if(Math.hypot(e.clientX - tapX, e.clientY - tapY) > 8) tap = false;
       }
     });
-    function finishDraw(){
-      if(!drawing) return;
-      drawing = false;
-      const hasContent = rec.baseImage || rec.strokes.some(s => s.points.length > 0);
-      cut.image = hasContent ? flattenToDataURL(ctx, rec.baseImage, rec.strokes) : null;
-      /* This bypasses the fullscreen editor, so any live stroke data cached from a previous
-         editor session no longer matches cut.image — drop it so the next time the editor
-         opens it falls back to loading the flattened image fresh instead of showing stale,
-         now-inaccurate strokes. */
-      cut.editorStrokes = null;
-      cut.editorPhoto = null;
-      cut.editorActions = null;
-      cut.editorRedoActions = null;
-      saveCut(cut.id);
-      stroke = null;
-    }
     canvas.addEventListener('pointerup', e => {
-      if(drawing){ finishDraw(); return; }
       if(tap && e.pointerId === tapId){
         const dt = Date.now() - tapT;
         tap = false;
         if(dt < 500) openEditor(cut.id);
       }
     });
-    canvas.addEventListener('pointercancel', () => { if(drawing) finishDraw(); tap = false; });
+    canvas.addEventListener('pointercancel', () => { tap = false; });
   }
 
   function reloadInlineCanvas(unit){
@@ -4258,15 +4259,69 @@
   const ectx = editorCanvas.getContext('2d');
   const editorCutNumEl = document.getElementById('editorCutNum');
   const editorEmptyHint = document.getElementById('editorEmptyHint');
+  const editorEmptyHintText = document.getElementById('editorEmptyHintText');
   const fileInput = document.getElementById('fileInput');
   const canvasWrap = document.querySelector('.editor-canvas-wrap');
   const eraserTypeToggle = document.getElementById('eraserTypeToggle');
+  const penInputToggle = document.getElementById('penInputToggle');
+  const editorToolbarEl = document.getElementById('editorToolbar');
+
+  /* editor-toolbar uses touch-action:none (see the CSS comment on .editor-toolbar) to keep Apple
+     Pencil's Scribble gesture from hijacking taps, which as a side effect disables the toolbar's
+     own native horizontal scroll for touch/pencil drags. This restores that scrolling manually —
+     same touch-action:none + manual pointer-driven scroll (with the shared momentum helper) already
+     used for tiles and the sidebar scene list. A capturing click listener swallows the click that
+     would otherwise fire on whatever button the drag ends over, so scrolling the toolbar never
+     also fires a tool/color/size change. */
+  (function setupToolbarScroll(){
+    let pointerId = null, startX = 0, startScroll = 0, dragging = false, velTracker = null, suppressClick = false;
+    let momentumCancel = null;
+
+    editorToolbarEl.addEventListener('pointerdown', e => {
+      if(momentumCancel){ momentumCancel(); momentumCancel = null; }
+      pointerId = e.pointerId;
+      startX = e.clientX;
+      startScroll = editorToolbarEl.scrollLeft;
+      dragging = false;
+      velTracker = createVelocityTracker(e.clientX);
+    });
+    editorToolbarEl.addEventListener('pointermove', e => {
+      if(e.pointerId !== pointerId) return;
+      const dx = e.clientX - startX;
+      if(!dragging){
+        if(Math.abs(dx) <= 6) return;
+        dragging = true;
+        suppressClick = true;
+      }
+      e.preventDefault();
+      editorToolbarEl.scrollTo({ left: startScroll - dx, behavior: 'instant' });
+      velTracker.sample(e.clientX);
+    });
+    function endDrag(e){
+      if(e.pointerId !== pointerId) return;
+      if(dragging){
+        const perFrame = velocityToPerFrame(velTracker);
+        if(perFrame !== null) momentumCancel = startMomentumScroll(editorToolbarEl, 'x', perFrame);
+      }
+      pointerId = null; dragging = false;
+    }
+    editorToolbarEl.addEventListener('pointerup', endDrag);
+    editorToolbarEl.addEventListener('pointercancel', endDrag);
+    editorToolbarEl.addEventListener('click', e => {
+      if(suppressClick){ e.preventDefault(); e.stopPropagation(); suppressClick = false; }
+    }, true);
+  })();
 
   editorCanvas.width = CANVAS_W;
   editorCanvas.height = CANVAS_H;
 
   const editorState = { cutId: null, baseImage: null, photoDataURL: null, strokes: [], actions: [], redoActions: [], tool: 'pen', color: '#221F1C', size: 8, photoTransform: { scale: 1, offsetX: 0, offsetY: 0 } };
   let editorEraserType = 'object'; /* 'object' | 'pixel' */
+  /* Finger-drawing toggle: off by default (Apple Pencil only), like editorEraserType this is a
+     session-level setting (not per-cut, not reset in openEditor) — it stays as the user left it
+     while navigating between shots. Only pointerType 'touch' is ever gated by this; 'pen' and
+     'mouse' can always draw, so trackpad/mouse testing keeps working regardless of the toggle. */
+  let fingerDrawEnabled = false;
   let drawing = false, currentStroke = null, eraseSessionRemovals = null;
   let movePointers = new Map(); /* pointerId -> {x,y} local canvas point, active while tool==='move' */
   let moveGestureStart = null;  /* snapshot of photoTransform + pointer positions at gesture start, for pan/pinch delta math */
@@ -4327,9 +4382,9 @@
     /* editorStrokes/editorPhoto hold the still-editable, un-flattened drawing from the last
        time THIS cut was edited in the fullscreen editor — restoring them (instead of just
        reloading the flattened cut.image as an opaque picture) is what lets the object eraser
-       keep working after closing and reopening. They're invalidated (see finishDraw) whenever
-       inline card drawing changes cut.image behind the editor's back, in which case we fall
-       back to the flattened image same as before. */
+       keep working after closing and reopening. (The inline card canvas can no longer draw at
+       all, so there's no longer a way for cut.image to change behind the editor's back and
+       invalidate these — they only ever change here, inside the editor itself.) */
     const restoreStrokes = Array.isArray(cut.editorStrokes) ? JSON.parse(JSON.stringify(cut.editorStrokes)) : null;
     if(cut.editorPhoto){
       editorEmptyHint.style.display = 'none';
@@ -4683,6 +4738,19 @@
   });
 
   editorCanvas.addEventListener('pointerdown', e => {
+    /* Photo pan/pinch-zoom (the Move tool) inherently needs touch — a single Apple Pencil point
+       can't do a two-finger pinch — so it's exempt from the finger-drawing gate entirely.
+       Selection is split in two: tracing a brand-new lasso outline needs Apple-Pencil precision,
+       so touch can never start one — that's a hard rule, independent of the finger-drawing
+       toggle (fingerDrawEnabled on doesn't loosen it). Once a selection exists, dragging it or
+       its resize/rotate handles is a coarse gesture rather than precise tracing, so that stays
+       touch-friendly always (see the selectionBoxEl/.sel-handle listeners, which carry no
+       pointerType check at all). Pen/Eraser (which put new ink down) are the only tools actually
+       gated by the toggle: with finger drawing off, a touch pointer on those is ignored entirely
+       rather than starting a stroke/erase. */
+    if(e.pointerType === 'touch' && editorState.tool !== 'move'){
+      if(editorState.tool === 'select' || !fingerDrawEnabled) return;
+    }
     editorCanvas.setPointerCapture(e.pointerId);
     if(editorState.tool === 'move'){
       if(!editorState.baseImage) return;
@@ -4827,7 +4895,24 @@
     document.querySelectorAll('.size-dot').forEach(d => d.classList.toggle('active', Number(d.dataset.size) === editorState.size));
     document.querySelectorAll('.eraser-type-btn').forEach(b => b.classList.toggle('active', editorState.tool === 'eraser' && b.dataset.eraserType === editorEraserType));
     eraserTypeToggle.classList.toggle('tool-active', editorState.tool === 'eraser');
+    /* Pen tool selector + input-mode toggle combined into one box (mirrors the eraser box's
+       icon+sub-options pattern): the two icons here ARE the Pen tool button now — clicking
+       either one selects the Pen tool AND sets the input mode in one action, so there's no
+       separate standalone Pen button anymore. */
+    document.querySelectorAll('.pen-input-btn').forEach(b => b.classList.toggle('active', editorState.tool === 'pen' && ((b.dataset.penInput === 'finger') === fingerDrawEnabled)));
+    penInputToggle.classList.toggle('tool-active', editorState.tool === 'pen');
+    editorEmptyHintText.innerHTML = fingerDrawEnabled
+      ? 'Draw with your finger or Pencil,<br>or paste a photo'
+      : 'Draw with Apple Pencil,<br>or paste a photo';
   }
+  document.querySelectorAll('.pen-input-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      fingerDrawEnabled = btn.dataset.penInput === 'finger';
+      editorState.tool = 'pen';
+      hidePhotoSelectUI();
+      setActiveToolUI();
+    });
+  });
   function updateEditorUndoRedoButtons(){
     document.getElementById('undoBtn').classList.toggle('disabled', editorState.actions.length === 0);
     document.getElementById('redoBtn').classList.toggle('disabled', editorState.redoActions.length === 0);
