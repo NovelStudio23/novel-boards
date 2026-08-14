@@ -493,6 +493,7 @@
   .note-line[data-placeholder]:empty::before{ content:attr(data-placeholder); color:var(--ink-dim); pointer-events:none; }
 
   /* ---------- Editor modal (Frame drawing) ---------- */
+  .editor-modal.no-slide-transition{ transition:none; }
   .editor-modal{
     position:fixed; inset:0; background:var(--bg-deep); z-index:100;
     display:flex; flex-direction:column;
@@ -508,7 +509,7 @@
   .editor-done-btn{ display:flex; align-items:center; gap:6px; padding:9px 16px; border-radius:20px; background:var(--accent); color:#fff; font-weight:700; font-size:13.5px; }
   .editor-done-btn svg{ width:15px; height:15px; }
   .editor-label{ font-family:var(--font-mono); color:var(--text-dim); font-size:12px; letter-spacing:.06em; }
-  .editor-topbar-spacer{ width:70px; }
+  .editor-topbar-spacer{ width:87px; }
 
   .editor-canvas-wrap{ flex:1 1 auto; min-height:0; display:flex; align-items:center; justify-content:center; padding:8px 18px; position:relative; }
   .editor-frame-inner{
@@ -836,13 +837,13 @@
 </div>
 
 <div class="editor-modal" id="editorModal" tabindex="-1">
-  <div class="editor-topbar">
+  <div class="editor-topbar" id="editorTopbar">
+    <div class="editor-topbar-spacer"></div>
+    <div class="editor-label"><span id="editorCutNum">01</span></div>
     <button id="editorCloseBtn" class="editor-done-btn">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>
       <span>Done</span>
     </button>
-    <div class="editor-label"><span id="editorCutNum">01</span></div>
-    <div class="editor-topbar-spacer"></div>
   </div>
 
   <div class="editor-canvas-wrap">
@@ -880,7 +881,7 @@
           <rect x="10.2" y="2.5" width="3.2" height="14.5" rx="1.6"/>
           <rect x="14" y="5.3" width="3.1" height="11.7" rx="1.55"/>
           <rect x="17.7" y="8.5" width="2.7" height="9" rx="1.35"/>
-          <rect x="-0.5" y="14.6" width="7.5" height="4.7" rx="2.35" transform="rotate(-32 7 17)"/>
+          <rect x="-0.5" y="18.8" width="7.5" height="4.7" rx="2.35" transform="rotate(50 7 21.2)"/>
         </svg>
       </button>
     </div>
@@ -1951,7 +1952,7 @@
              (toggles selection) instead. Trash: tap intentionally does nothing, same as before
              this fix — this handler exists here purely to enable scrolling. */
         } else if(editMode){
-          openEditor(id);
+          openEditor(id, tileEl);
         } else {
           setViewMode('basic');
           requestAnimationFrame(() => jumpToCut(id));
@@ -4229,32 +4230,16 @@
       if(tap && e.pointerId === tapId){
         const dt = Date.now() - tapT;
         tap = false;
-        if(dt < 500) openEditor(cut.id);
+        if(dt < 500) openEditor(cut.id, canvas.parentElement);
       }
     });
     canvas.addEventListener('pointercancel', () => { tap = false; });
   }
 
-  function reloadInlineCanvas(unit){
-    const rec = unit._inline;
-    if(!rec) return;
-    const cut = state.cuts[unit.dataset.unitId];
-    if(!cut) return;
-    rec.strokes = [];
-    if(cut.image){
-      const img = new Image();
-      img.onload = () => { rec.baseImage = img; renderFrameCanvas(rec.ctx, rec.baseImage, rec.strokes); };
-      img.src = cut.image;
-      unit._hintEl.style.display = 'none';
-    } else {
-      rec.baseImage = null;
-      renderFrameCanvas(rec.ctx, rec.baseImage, rec.strokes);
-      unit._hintEl.style.display = 'flex';
-    }
-  }
-
   /* ===================== Fullscreen editor ===================== */
   const editorModal = document.getElementById('editorModal');
+  const editorTopbarEl = document.getElementById('editorTopbar');
+  const editorFrameInnerEl = document.getElementById('editorFrameInner');
   const editorCanvas = document.getElementById('editorCanvas');
   const ectx = editorCanvas.getContext('2d');
   const editorCutNumEl = document.getElementById('editorCutNum');
@@ -4265,6 +4250,7 @@
   const eraserTypeToggle = document.getElementById('eraserTypeToggle');
   const penInputToggle = document.getElementById('penInputToggle');
   const editorToolbarEl = document.getElementById('editorToolbar');
+  const appEl = document.getElementById('app');
 
   /* editor-toolbar uses touch-action:none (see the CSS comment on .editor-toolbar) to keep Apple
      Pencil's Scribble gesture from hijacking taps, which as a side effect disables the toolbar's
@@ -4283,6 +4269,11 @@
       startX = e.clientX;
       startScroll = editorToolbarEl.scrollLeft;
       dragging = false;
+      /* Reset here rather than only after a click consumes it: a drag doesn't always end in a
+         click event at all (many browsers skip synthesizing one once movement exceeds their own
+         internal slop threshold), so waiting for the click handler to clear the flag can leave
+         it stuck true and silently swallow the next, unrelated tap. */
+      suppressClick = false;
       velTracker = createVelocityTracker(e.clientX);
     });
     editorToolbarEl.addEventListener('pointermove', e => {
@@ -4312,6 +4303,25 @@
     }, true);
   })();
 
+  /* touch-action:none alone does not reliably stop iPadOS Scribble from intercepting Apple
+     Pencil input in WebKit — this is a known, documented WebKit quirk (see e.g.
+     https://mikepk.com/2020/10/iOS-safari-scribble-bug/), where Scribble can still swallow
+     pointer/touch samples even on elements with touch-action fully disabled. The verified
+     workaround is a genuine 'touchmove' listener (not pointermove) that calls preventDefault —
+     for reasons WebKit doesn't document, this specifically signals "this touch is being handled
+     natively by the page" in a way pointer-event preventDefault and touch-action don't. This is
+     bound with {passive:false} (required for preventDefault to have any effect) on both the
+     toolbar (stops Scribble from opening over its buttons) and the canvas (the same dropped-
+     sample behavior is very likely why pen strokes come out with visible kinks — missing
+     midpoints — specifically while finger drawing is off and Apple Pencil is the only option in
+     regular use, since that's when pencil gets sustained, deliberate stroke-length usage). Only
+     'touchmove' needs this: preventDefault on 'touchstart' would also suppress the compatibility
+     click that follows a tap, which touchmove does not do, so plain taps on toolbar buttons stay
+     unaffected. */
+  [editorToolbarEl, editorCanvas].forEach(el => {
+    el.addEventListener('touchmove', e => e.preventDefault(), { passive: false });
+  });
+
   editorCanvas.width = CANVAS_W;
   editorCanvas.height = CANVAS_H;
 
@@ -4322,7 +4332,75 @@
      while navigating between shots. Only pointerType 'touch' is ever gated by this; 'pen' and
      'mouse' can always draw, so trackpad/mouse testing keeps working regardless of the toggle. */
   let fingerDrawEnabled = false;
+  /* Whichever card .frame / tile the editor was most recently opened from, kept around purely so
+     closeEditor can mirror the open animation in reverse (the frame shrinking back down to it)
+     instead of just sliding the whole modal down. Re-validated at close time (isConnected + a
+     real size) rather than trusted blindly, since it's always possible for the underlying card
+     to have been removed while the editor was open in some edge case. */
+  let editorOpenSourceEl = null;
   let drawing = false, currentStroke = null, eraseSessionRemovals = null;
+  /* [123] Pen input smoothing — Apple Pencil only; touch/mouse points are pushed exactly as
+     toLocalPoint reports them, unchanged, since that path already draws naturally and must stay
+     untouched (see codebase convention re: drawStroke/touch input).
+     This is a small-lookahead SYMMETRIC window, not the causal (backward-only) EMA used in earlier
+     revisions of this file. The causal EMA could only ever look at samples already received, and
+     at the alpha values needed to tame fast-stroke jitter, that backward-only view measurably CUT
+     CORNERS — a fast 90° turn tested at ~97 canvas px off from the true corner, because the filter
+     hadn't caught up to the direction change yet by the time the pen reached it. A later attempt
+     fixed that by re-smoothing the whole stroke non-causally, but ONLY at the end (on pointerup) —
+     which fixed the corner but meant the committed shape could visibly "snap" to something
+     different from what was drawn live, right as the pen lifted. Reverted for that reason.
+     This version keeps the same core idea (a symmetric window sees both sides of a point, so it
+     doesn't cut corners the way a backward-only filter does) but applies it AS THE STROKE IS BEING
+     DRAWN, continuously, via a short delay — not as a one-time pass at the end. A point is only
+     committed to currentStroke.points once PEN_WINDOW_RADIUS more raw samples have arrived after
+     it, at which point its final (symmetrically-smoothed) position is already fully determined and
+     never touched again. So there's no "live version" and "final version" to snap between — what's
+     drawn live *is* the final version, just revealed a few samples late. At native Pencil sampling
+     (~240Hz), that delay is on the order of PEN_WINDOW_RADIUS × ~4ms — a handful of milliseconds —
+     and the live-preview layer below (drawPenLivePreview) fills in that gap visually so it doesn't
+     read as lag. Exact stroke start/end are always anchored to the true raw touchdown/lift-up
+     position, matching the same convention every smoothing approach in this file has followed. */
+  let penRawBuffer = null;      /* raw {x,y,pressure} samples for the CURRENT pen stroke, in order; null between strokes */
+  let penCommittedCount = 0;    /* how many of penRawBuffer's samples already have a corresponding (finalized, never-revisited) point in currentStroke.points */
+  const PEN_WINDOW_RADIUS = 2;  /* samples of lookahead required before a point can be committed — see block comment above for why small is fine here */
+  const PEN_WINDOW_KERNEL = (function(radius){
+    const sigma = radius / 2;
+    const k = [];
+    for(let i = -radius; i <= radius; i++) k.push(Math.exp(-(i * i) / (2 * sigma * sigma)));
+    return k;
+  })(PEN_WINDOW_RADIUS);
+  function penWindowedPoint(buffer, i, kernel){
+    const radius = (kernel.length - 1) / 2;
+    let sx = 0, sy = 0, sp = 0, wtotal = 0;
+    for(let k = -radius; k <= radius; k++){
+      const idx = i + k;
+      if(idx < 0 || idx >= buffer.length) continue; /* clipped near the buffer's own edges — no fake padding, just fewer samples averaged there */
+      const w = kernel[k + radius];
+      sx += buffer[idx].x * w; sy += buffer[idx].y * w; sp += buffer[idx].pressure * w;
+      wtotal += w;
+    }
+    return { x: sx / wtotal, y: sy / wtotal, pressure: sp / wtotal };
+  }
+  /* Pushes every raw sample that's now ready (has PEN_WINDOW_RADIUS samples of lookahead) into
+     currentStroke.points. Called after every pointermove batch (isFinal=false, only pushes what's
+     genuinely ready) and once more from endStroke (isFinal=true, flushes whatever's left using
+     however much lookahead actually exists — down to zero for the very last sample, which is
+     anchored exactly rather than windowed at all). */
+  function drainReadyPenPoints(isFinal){
+    if(!currentStroke || !penRawBuffer) return;
+    while(penCommittedCount < penRawBuffer.length){
+      const i = penCommittedCount;
+      const hasFullLookahead = (i + PEN_WINDOW_RADIUS) < penRawBuffer.length;
+      if(!isFinal && !hasFullLookahead) break;
+      const isLastSample = isFinal && i === penRawBuffer.length - 1;
+      const pt = isLastSample
+        ? { x: penRawBuffer[i].x, y: penRawBuffer[i].y, pressure: penRawBuffer[i].pressure } /* exact lift-up position */
+        : penWindowedPoint(penRawBuffer, i, PEN_WINDOW_KERNEL);
+      currentStroke.points.push(pt);
+      penCommittedCount++;
+    }
+  }
   let movePointers = new Map(); /* pointerId -> {x,y} local canvas point, active while tool==='move' */
   let moveGestureStart = null;  /* snapshot of photoTransform + pointer positions at gesture start, for pan/pinch delta math */
   let photoLongPressTimer = null;
@@ -4351,10 +4429,188 @@
   let selectionGesture = null;
   const selectionBoxEl = document.getElementById('selectionBox');
 
-  function openEditor(cutId){
+  /* FLIP-animates the fullscreen editor's frame growing out of whatever card/tile frame was
+     actually tapped, instead of the editor just sliding up from the bottom — "First" is the
+     tapped element's on-screen rect, "Last" is the editor frame's natural fullscreen rect once
+     the modal is open, and the frame is instantly transformed to sit exactly over First before
+     animating back to identity, which is what makes it read as that same frame growing rather
+     than a new one appearing. Same technique already used for the shot-card insertion animation
+     elsewhere in the app, just applied to a single element instead of a FLIP-reordered list.
+     sourceEl is optional — every current caller has one (a card's .frame or a tile), but this
+     stays a graceful no-op (falls through to the modal's plain slide-up) if a future call site
+     ever doesn't. */
+  function animateEditorFrameOpen(sourceEl){
+    if(!sourceEl) return false;
+    const startRect = sourceEl.getBoundingClientRect();
+    if(startRect.width < 1 || startRect.height < 1) return false;
+
+    editorModal.classList.add('no-slide-transition');
+    editorModal.classList.add('open');
+    void editorModal.offsetHeight; /* force layout so 'open' + no-slide-transition apply before we measure */
+
+    const endRect = editorFrameInnerEl.getBoundingClientRect();
+    if(endRect.width < 1 || endRect.height < 1){
+      editorModal.classList.remove('no-slide-transition');
+      return false;
+    }
+    const scaleX = startRect.width / endRect.width;
+    const scaleY = startRect.height / endRect.height;
+    const translateX = (startRect.left + startRect.width / 2) - (endRect.left + endRect.width / 2);
+    const translateY = (startRect.top + startRect.height / 2) - (endRect.top + endRect.height / 2);
+
+    editorFrameInnerEl.style.transition = 'none';
+    editorFrameInnerEl.style.transformOrigin = 'center center';
+    editorFrameInnerEl.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`;
+    editorTopbarEl.style.transition = 'none';
+    editorTopbarEl.style.opacity = '0';
+    editorToolbarEl.style.transition = 'none';
+    editorToolbarEl.style.opacity = '0';
+
+    void editorFrameInnerEl.offsetHeight; /* force layout before releasing the transform, or it never animates */
+
+    requestAnimationFrame(() => {
+      editorFrameInnerEl.style.transition = 'transform .38s cubic-bezier(.32,.72,0,1)';
+      editorFrameInnerEl.style.transform = 'translate(0,0) scale(1,1)';
+      editorTopbarEl.style.transition = 'opacity .3s ease .1s';
+      editorTopbarEl.style.opacity = '1';
+      editorToolbarEl.style.transition = 'opacity .3s ease .1s';
+      editorToolbarEl.style.opacity = '1';
+    });
+
+    const cleanup = () => {
+      if(cleanup.done) return;
+      cleanup.done = true;
+      clearTimeout(fallbackId);
+      editorFrameInnerEl.removeEventListener('transitionend', cleanup);
+      editorFrameInnerEl.style.transition = '';
+      editorFrameInnerEl.style.transform = '';
+      editorFrameInnerEl.style.transformOrigin = '';
+      editorTopbarEl.style.transition = '';
+      editorTopbarEl.style.opacity = '';
+      editorToolbarEl.style.transition = '';
+      editorToolbarEl.style.opacity = '';
+      editorModal.classList.remove('no-slide-transition');
+    };
+    editorFrameInnerEl.addEventListener('transitionend', cleanup);
+    /* Belt-and-suspenders: if the transition never fires transitionend for any reason (element
+       removed mid-flight, browser quirk), don't leave the frame permanently stuck mid-transform.
+       Kept close to the actual .38s transition duration rather than a generously round number —
+       falling back to this is meant to be a rare safety net, not a routine path, so it shouldn't
+       itself become a source of the exact extra-delay feeling this animation was built to avoid.
+       Critically, whichever path runs also cancels/detaches the other: transitionend not firing
+       reliably turned out to be common enough here that leaving the timer running (or leaving
+       this listener attached with just {once:true}, which only ever self-removes AFTER firing)
+       meant a later, unrelated transitionend on this same element — e.g. from the NEXT time this
+       function runs — could trigger this stale cleanup all over again mid-flight, stomping on
+       styles a brand new animation had just set up. */
+    const fallbackId = setTimeout(cleanup, 370);
+    return true;
+  }
+
+  /* Mirror image of animateEditorFrameOpen: shrinks the frame back down to wherever it opened
+     from, then hides the modal — rather than sliding the whole modal down, which is what happens
+     whenever there's no valid source to shrink back to. onDone always fires exactly once, whether
+     or not the animated path was taken, so callers don't need to branch on the return value. */
+  function animateEditorFrameClose(onDone){
+    const sourceEl = editorOpenSourceEl;
+    if(!sourceEl || !sourceEl.isConnected){ editorModal.classList.remove('open'); onDone(); return; }
+    const endRect = sourceEl.getBoundingClientRect();
+    const startRect = editorFrameInnerEl.getBoundingClientRect();
+    if(endRect.width < 1 || endRect.height < 1 || startRect.width < 1 || startRect.height < 1){
+      editorModal.classList.remove('open');
+      onDone();
+      return;
+    }
+    const scaleX = endRect.width / startRect.width;
+    const scaleY = endRect.height / startRect.height;
+    const translateX = (endRect.left + endRect.width / 2) - (startRect.left + startRect.width / 2);
+    const translateY = (endRect.top + endRect.height / 2) - (startRect.top + startRect.height / 2);
+
+    editorFrameInnerEl.style.transition = 'none';
+    editorFrameInnerEl.style.transformOrigin = 'center center';
+    editorFrameInnerEl.style.transform = 'translate(0,0) scale(1,1)';
+    /* Neutralize the modal's own drop shadow (0 24px 60px rgba(0,0,0,.5) from .editor-frame-inner)
+       right away, before the shrink even starts, rather than letting it ride along and fade out
+       gradually. Neither the destination .frame (Normal View) nor .tile (Tile View) card has any
+       box-shadow at all — and since transform:scale() only shrinks the shadow's rendered size, not
+       its alpha, a visible dark halo was still there (just proportionally smaller) right up to the
+       instant the modal gets torn down at the end, at which point it vanished all at once against
+       the shadow-less real card underneath — exactly the "pops instead of settles" moment. It's
+       invisible at fullscreen size anyway (off past the visible edges), so removing it here has no
+       visible effect on the frame *before* it starts shrinking — the frame is already visually
+       identical to its destination for the whole animation, with nothing left to hand off at the
+       end. Restored in finish() below so the next openEditor() gets the real fullscreen shadow back. */
+    editorFrameInnerEl.style.boxShadow = 'none';
+    editorTopbarEl.style.transition = 'none';
+    editorToolbarEl.style.transition = 'none';
+    /* The main app view is sitting there the whole time, already fully rendered behind the
+       modal's opaque background — it never needed "loading", just a reason to be visible sooner.
+       Snapping it to slightly-enlarged-and-transparent first, then animating both it and the
+       modal's own background back to normal in step with the frame shrinking, is what makes the
+       two feel like one continuous motion landing together instead of the frame shrinking alone
+       on a blank dark screen and everything else just cutting in once it's done. */
+    editorModal.style.transition = 'none';
+    appEl.style.transition = 'none';
+    appEl.style.transform = 'scale(1.045)';
+    appEl.style.opacity = '0';
+
+    void editorFrameInnerEl.offsetHeight; /* force layout before starting the transition */
+
+    requestAnimationFrame(() => {
+      editorFrameInnerEl.style.transition = 'transform .34s cubic-bezier(.32,.72,0,1)';
+      editorFrameInnerEl.style.transform = `translate(${translateX}px, ${translateY}px) scale(${scaleX}, ${scaleY})`;
+      editorTopbarEl.style.transition = 'opacity .2s ease';
+      editorTopbarEl.style.opacity = '0';
+      editorToolbarEl.style.transition = 'opacity .2s ease';
+      editorToolbarEl.style.opacity = '0';
+      editorModal.style.transition = 'background-color .34s cubic-bezier(.32,.72,0,1)';
+      editorModal.style.backgroundColor = 'rgba(44,44,47,0)';
+      appEl.style.transition = 'transform .34s cubic-bezier(.32,.72,0,1), opacity .34s cubic-bezier(.32,.72,0,1)';
+      appEl.style.transform = 'scale(1)';
+      appEl.style.opacity = '1';
+    });
+
+    const finish = () => {
+      if(finish.done) return;
+      finish.done = true;
+      clearTimeout(fallbackId);
+      editorFrameInnerEl.removeEventListener('transitionend', finish);
+      /* Hide the modal instantly (no-slide-transition) now that the frame has already visually
+         shrunk down to the source — letting the normal slide transition run here too would show
+         the whole (now tiny-framed) modal sliding downward as an unwanted second motion. */
+      editorModal.classList.add('no-slide-transition');
+      editorModal.classList.remove('open');
+      editorFrameInnerEl.style.transition = '';
+      editorFrameInnerEl.style.transform = '';
+      editorFrameInnerEl.style.transformOrigin = '';
+      editorFrameInnerEl.style.boxShadow = '';
+      editorTopbarEl.style.transition = '';
+      editorTopbarEl.style.opacity = '';
+      editorToolbarEl.style.transition = '';
+      editorToolbarEl.style.opacity = '';
+      editorModal.style.transition = '';
+      editorModal.style.backgroundColor = '';
+      appEl.style.transition = '';
+      appEl.style.transform = '';
+      appEl.style.opacity = '';
+      void editorModal.offsetHeight;
+      editorModal.classList.remove('no-slide-transition');
+      onDone();
+    };
+    /* See the matching comment in animateEditorFrameOpen: not using {once:true} and instead
+       explicitly removing this listener (from whichever of transitionend/the fallback timer
+       actually runs finish()) is what stops a late, unrelated transitionend on this same element
+       — most often from the NEXT open/close — from re-triggering this stale callback and
+       stomping on a brand new animation's styles mid-flight. */
+    editorFrameInnerEl.addEventListener('transitionend', finish);
+    const fallbackId = setTimeout(finish, 370);
+  }
+
+  function openEditor(cutId, sourceEl){
     if(!editMode) return;
     const cut = state.cuts[cutId];
     if(!cut) return;
+    editorOpenSourceEl = sourceEl || null;
     editorState.cutId = cutId;
     editorState.baseImage = null;
     editorState.photoDataURL = null;
@@ -4377,7 +4633,7 @@
 
     editorCutNumEl.textContent = shotLabelFor(cutId);
 
-    editorModal.classList.add('open');
+    if(!animateEditorFrameOpen(sourceEl)) editorModal.classList.add('open');
 
     /* editorStrokes/editorPhoto hold the still-editable, un-flattened drawing from the last
        time THIS cut was edited in the fullscreen editor — restoring them (instead of just
@@ -4511,30 +4767,54 @@
     clearTimeout(photoLongPressTimer);
     hidePhotoSelectUI();
     clearSelection();
-    if(commit && editorState.cutId){
-      const cut = state.cuts[editorState.cutId];
-      if(cut){
-        const hasContent = editorState.baseImage || editorState.strokes.length > 0;
-        cut.image = hasContent ? flattenToDataURL(ectx, editorState.baseImage, editorState.strokes, editorState.photoTransform) : null;
-        /* Keep the live, still-editable drawing data around (separate from the flattened
-           cut.image) so reopening the editor can restore individual strokes instead of one
-           opaque picture — that's what object eraser needs to keep working. */
-        cut.editorPhoto = editorState.photoDataURL || null;
-        cut.editorPhotoTransform = editorState.photoDataURL ? JSON.parse(JSON.stringify(editorState.photoTransform)) : null;
-        cut.editorStrokes = JSON.parse(JSON.stringify(editorState.strokes));
-        cut.editorActions = JSON.parse(JSON.stringify(editorState.actions));
-        cut.editorRedoActions = JSON.parse(JSON.stringify(editorState.redoActions));
-        saveCut(cut.id);
-        if(viewMode === 'tile'){
-          refreshTileImage(cut.id);
-        } else {
-          const unit = filmstripEl.querySelector('.cut-unit[data-unit-id="' + cut.id + '"]');
-          if(unit) reloadInlineCanvas(unit);
+
+    /* Kick the shrink animation off first, before any of the save/thumbnail work below, so Done
+       feels instantly responsive instead of visibly waiting on a canvas encode + localStorage
+       write before it even starts moving. The actual save work is then deferred two rAFs out —
+       past the point the browser has painted the animation's first real frame — since transform/
+       opacity transitions run on the compositor and don't depend on the main thread once
+       started, but a big synchronous block (toDataURL, JSON.stringify, localStorage) run in the
+       very same tick as kicking the transition off can still delay that first paint. */
+    animateEditorFrameClose(() => {
+      editorOpenSourceEl = null;
+    });
+
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if(commit && editorState.cutId){
+        const cut = state.cuts[editorState.cutId];
+        if(cut){
+          const hasContent = editorState.baseImage || editorState.strokes.length > 0;
+          cut.image = hasContent ? flattenToDataURL(ectx, editorState.baseImage, editorState.strokes, editorState.photoTransform) : null;
+          /* Keep the live, still-editable drawing data around (separate from the flattened
+             cut.image) so reopening the editor can restore individual strokes instead of one
+             opaque picture — that's what object eraser needs to keep working. */
+          cut.editorPhoto = editorState.photoDataURL || null;
+          cut.editorPhotoTransform = editorState.photoDataURL ? JSON.parse(JSON.stringify(editorState.photoTransform)) : null;
+          cut.editorStrokes = JSON.parse(JSON.stringify(editorState.strokes));
+          cut.editorActions = JSON.parse(JSON.stringify(editorState.actions));
+          cut.editorRedoActions = JSON.parse(JSON.stringify(editorState.redoActions));
+          saveCut(cut.id);
+          if(viewMode === 'tile'){
+            refreshTileImage(cut.id);
+          } else {
+            const unit = filmstripEl.querySelector('.cut-unit[data-unit-id="' + cut.id + '"]');
+            if(unit && unit._inline){
+              /* Draws straight from the editor's own in-memory baseImage/strokes instead of
+                 going through reloadInlineCanvas's cut.image → new Image() → onload round-trip —
+                 that decode is asynchronous and not reliably done by the time the close animation
+                 settles, which is what let this specific card visibly pop in a beat late instead
+                 of just being there already, right as the modal disappears. */
+              const rec = unit._inline;
+              rec.baseImage = editorState.baseImage;
+              rec.strokes = editorState.strokes;
+              renderFrameCanvas(rec.ctx, rec.baseImage, rec.strokes, editorState.photoTransform);
+              unit._hintEl.style.display = hasContent ? 'none' : 'flex';
+            }
+          }
         }
       }
-    }
-    editorModal.classList.remove('open');
-    editorState.cutId = null;
+      editorState.cutId = null;
+    }));
   }
   document.getElementById('editorCloseBtn').addEventListener('click', () => closeEditor(true));
 
@@ -4739,18 +5019,13 @@
 
   editorCanvas.addEventListener('pointerdown', e => {
     /* Photo pan/pinch-zoom (the Move tool) inherently needs touch — a single Apple Pencil point
-       can't do a two-finger pinch — so it's exempt from the finger-drawing gate entirely.
-       Selection is split in two: tracing a brand-new lasso outline needs Apple-Pencil precision,
-       so touch can never start one — that's a hard rule, independent of the finger-drawing
-       toggle (fingerDrawEnabled on doesn't loosen it). Once a selection exists, dragging it or
-       its resize/rotate handles is a coarse gesture rather than precise tracing, so that stays
-       touch-friendly always (see the selectionBoxEl/.sel-handle listeners, which carry no
-       pointerType check at all). Pen/Eraser (which put new ink down) are the only tools actually
-       gated by the toggle: with finger drawing off, a touch pointer on those is ignored entirely
-       rather than starting a stroke/erase. */
-    if(e.pointerType === 'touch' && editorState.tool !== 'move'){
-      if(editorState.tool === 'select' || !fingerDrawEnabled) return;
-    }
+       can't do a two-finger pinch — so it's exempt from the finger-drawing gate. Selection is
+       split in two: tracing a brand-new lasso outline follows the finger-drawing toggle exactly
+       like Pen/Eraser (blocked via touch while off, allowed while on) — but once a selection
+       exists, moving it or dragging its resize/rotate handles is a coarse gesture rather than
+       precise tracing, so that part stays touch-friendly regardless of the toggle (see the
+       selectionBoxEl/.sel-handle listeners above, which carry no pointerType check at all). */
+    if(e.pointerType === 'touch' && editorState.tool !== 'move' && !fingerDrawEnabled) return;
     editorCanvas.setPointerCapture(e.pointerId);
     if(editorState.tool === 'move'){
       if(!editorState.baseImage) return;
@@ -4795,6 +5070,11 @@
     drawing = true;
     editorEmptyHint.style.display = 'none';
     const p = toLocalPoint(editorCanvas, e);
+    /* [123] Seed the raw buffer with the stroke's true starting point — see penRawBuffer above.
+       currentStroke.points already contains this same point (pushed below), so penCommittedCount
+       starts at 1, not 0, to keep the buffer and the committed-points array index-aligned. */
+    penRawBuffer = e.pointerType === 'pen' ? [{ x: p.x, y: p.y, pressure: p.pressure }] : null;
+    penCommittedCount = e.pointerType === 'pen' ? 1 : 0;
     if(editorState.tool === 'eraser' && editorEraserType === 'object'){
       currentStroke = null;
       eraseSessionRemovals = [];
@@ -4837,14 +5117,67 @@
       return;
     }
     if(!drawing) return;
-    const p = toLocalPoint(editorCanvas, e);
+    /* getCoalescedEvents() matters a lot here: Apple Pencil reports at up to 240Hz, but the
+       browser only actually dispatches a pointermove once per display-refresh tick (~60–120Hz),
+       batching the extra in-between samples into this event instead of firing separately for
+       each. Using only toLocalPoint(e) throws those batched samples away, so at normal drawing
+       speed the stroke ends up built from visibly fewer points than the Pencil actually
+       produced — exactly what native drawing apps don't do, and exactly why curves through those
+       sparser points show flatter, more faceted-looking segments instead of a continuously
+       smooth line. Falls back to just the one event on anything that doesn't support it. */
+    const moveEvents = (typeof e.getCoalescedEvents === 'function' && e.getCoalescedEvents().length) ? e.getCoalescedEvents() : [e];
     if(editorState.tool === 'eraser' && editorEraserType === 'object'){
-      eraseObjectsAt(p.x, p.y);
+      for(const ev of moveEvents){
+        const p = toLocalPoint(editorCanvas, ev);
+        eraseObjectsAt(p.x, p.y);
+      }
     } else if(currentStroke){
-      currentStroke.points.push(p);
+      for(const ev of moveEvents){
+        let pt = toLocalPoint(editorCanvas, ev);
+        if(ev.pointerType === 'pen'){
+          if(penRawBuffer) penRawBuffer.push({ x: pt.x, y: pt.y, pressure: pt.pressure });
+          continue; /* [123] pen points are committed via drainReadyPenPoints below, not pushed directly here — see penRawBuffer block comment above */
+        }
+        currentStroke.points.push(pt);
+      }
+      if(penRawBuffer) drainReadyPenPoints(false);
       redrawEditor();
+      /* [123] Live preview: draws the stroke's tail a little further than what's actually been
+         committed to currentStroke.points, so the small lookahead delay in drainReadyPenPoints
+         above doesn't read as lag. Two parts, concatenated into one temporary extension:
+           1. The uncommitted tail of penRawBuffer — real samples already received, just still
+              waiting on enough lookahead before their final (windowed) position is settled. Shown
+              here as-is (unsmoothed); once enough future samples arrive this exact same data gets
+              smoothed and promoted into currentStroke.points for real, so there's no meaningful
+              jump between "previewed" and "committed" for any given sample, just a brief window
+              where it's visible-but-not-yet-finalized.
+           2. Genuine OS pointer-position prediction, if available (getPredictedEvents() — a real
+              Pointer Events spec method, distinct from UIPencilInteraction, which is native-UIKit-
+              only and was never exposed to Safari). Native apps like Notes/PencilKit do the same
+              kind of speculative rendering to cut perceived latency.
+         Purely visual, never written into currentStroke.points — a wrong prediction can't corrupt
+         the saved stroke, it just gets fully overwritten by next frame's redrawEditor(), which
+         always clears and repaints from confirmed data only (see renderFrameCanvas's clearRect). */
+      if(currentStroke && e.pointerType === 'pen'){
+        drawPenLivePreview(e);
+      }
     }
   });
+  function drawPenLivePreview(e){
+    if(!currentStroke || !currentStroke.points.length || !penRawBuffer) return;
+    const uncommittedTail = penRawBuffer.slice(penCommittedCount);
+    let predicted = [];
+    if(typeof e.getPredictedEvents === 'function'){
+      const pe = e.getPredictedEvents();
+      if(pe && pe.length) predicted = pe.map(pev => toLocalPoint(editorCanvas, pev));
+    }
+    const previewPts = [currentStroke.points[currentStroke.points.length - 1], ...uncommittedTail, ...predicted];
+    if(previewPts.length < 2) return;
+    ectx.save();
+    ectx.globalAlpha = 0.85; /* a hair less than fully opaque, so the not-yet-final tail (especially its predicted portion) reads as subtle rather than a hard commitment */
+    drawStroke(ectx, { points: previewPts, size: currentStroke.size, mode: currentStroke.mode, color: currentStroke.color });
+    ectx.restore();
+  }
   function endStroke(e){
     if(editorState.tool === 'move'){
       clearTimeout(photoLongPressTimer);
@@ -4866,6 +5199,14 @@
     }
     if(!drawing) return;
     drawing = false;
+    /* [123] Flush any pen samples still waiting on lookahead — see drainReadyPenPoints above.
+       isFinal=true means: use whatever lookahead actually exists rather than waiting for more
+       (there is no more), and anchor the very last sample exactly rather than windowing it, same
+       as the stroke's first sample. Must run before currentStroke is cleared below. */
+    if(currentStroke && penRawBuffer) drainReadyPenPoints(true);
+    penRawBuffer = null;
+    penCommittedCount = 0;
+    if(currentStroke) redrawEditor(); /* replaces the last live-preview frame (partially raw tail, 0.85 opacity) with the true final committed stroke at full opacity */
     /* A whole object-erase drag (from touch-down to lift-off) commits as a single undo step,
        the same granularity a single pen stroke gets — one Undo click restores everything that
        particular drag erased, rather than needing one click per object it happened to cross. */
