@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<!-- Android/TWA (Play Store) support: no effect on iOS, which still reads only the apple-* tags below. -->
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#3C3C40">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Novel Boards</title>
@@ -441,23 +444,52 @@
   .notes-lines{
     position:relative; height:100%; width:100%; min-width:0; overflow-y:hidden; overflow-x:hidden;
     display:flex; flex-direction:column; padding:0 0 10px;
-    background-image: linear-gradient(var(--paper) 36px, var(--paper-line) 36px, var(--paper-line) 37.5px, var(--paper) 37.5px);
-    background-size:100% 37.5px; background-attachment:local;
   }
   .note-line{
     width:100%; min-width:0; height:37.5px; line-height:37.5px; flex:0 0 auto;
-    border:none; background:transparent; padding:0 16px; font-size:20.25px; color:var(--ink); outline:none;
-    white-space:nowrap; overflow:hidden;
+    border:none; border-bottom:1.5px solid var(--paper-line); background:transparent; padding:0 16px;
+    font-size:20.25px; color:var(--ink); outline:none; white-space:nowrap; overflow:hidden;
   }
   .note-line:focus{ background:var(--accent-soft); }
   body.view-mode .note-line{ cursor:default; }
+  /* Ruled line under whatever blank space is left below the last actual line, so the note area
+     still reads as lined paper even where nothing's been typed yet — same idea as the old
+     tiled-background approach this replaced, just as an ordinary flex:1 sibling that fills
+     leftover space in the column (ordinary elements never need a min-height beyond one line: on
+     a long note that already needs scrolling, flex-grow naturally contributes ~0 extra height
+     here since there's no leftover space to fill; on a short note it stretches to cover the rest
+     of the visible area). min-height keeps at least one blank ruled line always visible either
+     way. Both the border-bottom above and this element's own background are ordinary painted
+     content, not a CSS "attached" background — see the block comment on .notes-lines.expanded
+     below for why that distinction is the actual point of this whole change. */
+  .notes-lines-filler{
+    flex:1 1 auto; min-height:37.5px; width:100%;
+    background-image: linear-gradient(var(--paper) 36px, var(--paper-line) 36px, var(--paper-line) 37.5px, var(--paper) 37.5px);
+    background-size:100% 37.5px;
+  }
 
+  /* Scrolling here (the long-press "expand" zoom) used to desync visibly: the ruled-line pattern
+     was a CSS background-image with background-attachment:local, meant to scroll together with
+     this element's own overflow content. In principle that's exactly the right tool for a
+     scrolling ruled-paper look — but WebKit has a long-standing quirk where a locally-attached
+     background doesn't reliably repaint in the same frame as momentum-scrolled content
+     (-webkit-overflow-scrolling:touch), so during a scroll/flick the lines and the text visibly
+     separated for a moment before catching back up. Fixed by not using a "background" for the
+     lines at all: each .note-line now draws its own ruled line as an ordinary border-bottom on
+     itself (see above), and the blank space below the last line is covered by .notes-lines-filler,
+     an ordinary in-flow sibling with its own plain (non-attached) background. Neither depends on
+     WebKit syncing a background repaint to a separate content scroll — a bordered/backgrounded
+     element scrolling as part of ordinary page content has nothing to get out of sync with,
+     which is the actual "moves as one rigid page, like real paper" behavior that was wanted. */
   .notes-lines.expanded{
     overflow-y:auto; -webkit-overflow-scrolling:touch;
+  }
+  .notes-lines.expanded .note-line{ height:45px; line-height:45px; font-size:23.25px; padding:0 22px; }
+  .notes-lines.expanded .notes-lines-filler{
+    min-height:45px;
     background-image: linear-gradient(var(--paper) 43.5px, var(--paper-line) 43.5px, var(--paper-line) 45px, var(--paper) 45px);
     background-size:100% 45px;
   }
-  .notes-lines.expanded .note-line{ height:45px; line-height:45px; font-size:23.25px; padding:0 22px; }
 
   /* ---------- Notes expand overlay (long-press) ---------- */
   .notes-expand-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; transition:opacity .28s ease; z-index:150; }
@@ -531,6 +563,12 @@
     font-size:12.5px; font-weight:700; white-space:nowrap; pointer-events:auto;
     box-shadow:0 8px 20px rgba(0,0,0,.35);
   }
+  /* Without this, the global button:active{transform:scale(.95)} rule (higher specificity —
+     see .scene-select-circle above for the same issue) would REPLACE this button's own
+     translateX(-50%) centering transform instead of combining with it, so pressing Delete
+     visibly shifted the button sideways instead of shrinking it in place. Same fix, same
+     scale factor, as .delete-chip below. */
+  .photo-delete-btn:active{ transform:translateX(-50%) scale(.95); }
 
   /* Selection tool (4.x — lasso-select ink, Apple-Notes-style move/resize/rotate). The box is a
      real positioned DOM element (not canvas-drawn) so its corner/rotate handles can be ordinary
@@ -1397,13 +1435,24 @@
      the view back to the first shot with no way to recover "what was centered before" from
      inside the resize handler itself — by then the old layout is already gone. */
   let lastViewedCutId = null;
-  let scrollTrackRaf = null;
   let jumpScrollSuppressed = false;
   let jumpScrollSuppressTimer = null;
+  /* Every place that scroll-restores to a known shot (this tracker, jumpToCut, setEditMode's own
+     restore, the orientation-resize restore below) should also mark that shot as the current
+     lastViewedCutId immediately and synchronously, not just leave it to this tracker to
+     rediscover asynchronously off the resulting 'scroll' event. Two real, observed failure modes
+     came from skipping that: (1) rotating again quickly, before the previous rotation's restore
+     had gotten back around to a 'scroll' event confirming lastViewedCutId — the second rotation
+     would snapshot a stale pre-restore value instead of where it had just settled; (2) toggling
+     edit mode (including pressing Done) restores scroll via a completely separate code path in
+     setEditMode that never touched lastViewedCutId at all, so a rotation shortly after used
+     whatever was tracked before entering/leaving edit mode instead of the shot actually on
+     screen. Centralized here so every restore path stays in sync the same way. */
+  function markViewedCut(id){ if(id) lastViewedCutId = id; }
   /* Tracks the viewport size as of the last time we knew it was settled (i.e. not mid-rotation).
-     The 'resize' handler below updates this the instant it runs — but the axis-flip side effect
-     (landscape's scrollLeft vs portrait's scrollTop both reset to 0 when the grid direction
-     changes) can in some browsers fire its 'scroll' event *before* that 'resize' handler gets a
+     The orientation handler below updates this the instant it runs — but the axis-flip side
+     effect (landscape's scrollLeft vs portrait's scrollTop both reset to 0 when the grid
+     direction changes) can in some browsers fire its 'scroll' event *before* that handler gets a
      chance to run and snapshot pendingOrientationRestoreId, corrupting lastViewedCutId with
      "whatever's nearest position 0" (the start of the list) ahead of time — occasionally showing
      up as "jumps to the beginning" a rotation or two in, since the corruption only happens when
@@ -1412,6 +1461,7 @@
      shows up while the live size disagrees with the last-settled one is a rotation artifact, not
      a real user scroll, and is ignored here. */
   let lastSettledW = window.innerWidth, lastSettledH = window.innerHeight;
+  let lastScrollTrackTime = 0;
   filmstripEl.addEventListener('scroll', () => {
     if(jumpScrollSuppressed){
       /* Keep pushing the "settled" timer out on every scroll event; once movement genuinely
@@ -1422,38 +1472,50 @@
       jumpScrollSuppressTimer = setTimeout(() => { jumpScrollSuppressed = false; }, 150);
       return;
     }
-    if(scrollTrackRaf) return;
-    scrollTrackRaf = requestAnimationFrame(() => {
-      scrollTrackRaf = null;
-      if(window.innerWidth !== lastSettledW || window.innerHeight !== lastSettledH) return;
-      const id = findCenteredCutId();
-      if(id) lastViewedCutId = id;
-    });
+    /* Reads synchronously, right on the scroll event, rather than deferring the read to the next
+       animation frame — a deferred read leaves a ~16ms window where a resize/orientation event
+       could fire and snapshot a value that's one scroll event out of date, which on a quick flick-
+       then-immediately-rotate was enough to occasionally grab the wrong shot. findCenteredCutId is
+       real DOM work (O(shot count)), so this is throttled by elapsed time instead — cheaper than
+       every single scroll event on a long flick/momentum scroll, but without rAF's inherent lag. */
+    if(window.innerWidth !== lastSettledW || window.innerHeight !== lastSettledH) return;
+    const now = performance.now();
+    if(now - lastScrollTrackTime < 48) return;
+    lastScrollTrackTime = now;
+    markViewedCut(findCenteredCutId());
   }, { passive: true });
 
-  let orientationResizeTimer = null;
+  let orientationRestoreTimer = null;
   let pendingOrientationRestoreId = null;
-  window.addEventListener('resize', () => {
-    if(!orientationResizeTimer){
-      /* Snapshot now, on the first resize event of this batch — before the browser's own
-         axis-flip side effects (landscape's scrollLeft vs portrait's scrollTop both reset to 0
-         when the grid direction changes) fire a 'scroll' event that would otherwise corrupt
-         lastViewedCutId via the tracker above, wiping out the value we actually need. */
+  let orientationBatchActive = false;
+  function handleOrientationSignal(){
+    if(!orientationBatchActive){
+      orientationBatchActive = true;
+      /* Snapshot now, on the first signal of this batch (whichever of 'orientationchange' or
+         'resize' happens to fire first — browsers aren't fully consistent about which comes
+         first or whether both fire, so both are listened for and share this same guard) — before
+         the browser's own axis-flip side effects fire a 'scroll' event that would otherwise
+         corrupt lastViewedCutId via the tracker above, wiping out the value we actually need. */
       pendingOrientationRestoreId = lastViewedCutId;
     }
-    /* Mark the size as unsettled immediately, synchronously, as the very first thing any resize
-       event does — this is what the scroll-tracker guard above compares against. */
+    /* Mark the size as unsettled immediately, synchronously, as the very first thing any signal
+       in this batch does — this is what the scroll-tracker guard above compares against. */
     lastSettledW = -1; lastSettledH = -1;
-    clearTimeout(orientationResizeTimer);
-    orientationResizeTimer = setTimeout(() => {
-      orientationResizeTimer = null;
+    clearTimeout(orientationRestoreTimer);
+    orientationRestoreTimer = setTimeout(() => {
+      orientationRestoreTimer = null;
+      orientationBatchActive = false;
       if(pendingOrientationRestoreId) restoreScrollToCut(pendingOrientationRestoreId);
-      /* Settle now, after the restore's own scrollIntoView has been issued — its resulting
-         'scroll' event fires asynchronously (next frame), by which point the sizes will already
-         match again, so it updates lastViewedCutId normally instead of being swallowed. */
+      /* Settle now, after the restore's own scrollIntoView has been issued. Also re-confirm
+         lastViewedCutId synchronously right here (see markViewedCut's block comment) instead of
+         only waiting on the resulting 'scroll' event to (async, next frame) update it — closes
+         the window where a second rotation, started quickly, could otherwise read a stale value. */
       lastSettledW = window.innerWidth; lastSettledH = window.innerHeight;
+      markViewedCut(pendingOrientationRestoreId);
     }, 120);
-  });
+  }
+  window.addEventListener('resize', handleOrientationSignal);
+  window.addEventListener('orientationchange', handleOrientationSignal);
 
   function setEditMode(on){
     const wasEditing = editMode;
@@ -1469,6 +1531,10 @@
     if(!editMode && selectMode){ exitSelectMode(); renderFilmstrip(); renderScenesList(); }
     if(wasEditing && !editMode) applySceneReordering();
     if(anchorId) restoreScrollToCut(anchorId);
+    /* Keep the orientation tracker's notion of "what's currently on screen" in sync with this
+       restore too — see markViewedCut's block comment for why (a rotation shortly after toggling
+       edit mode, including pressing Done, otherwise used a stale pre-toggle value). */
+    markViewedCut(anchorId);
     updateSelectButtonVisibility();
     document.querySelectorAll('.scene-input-top').forEach(el => { el.readOnly = appMode === 'trash' || !editMode; });
     document.querySelectorAll('.note-line').forEach(el => { el.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true'; });
@@ -1989,10 +2055,31 @@
       let currentTarget = computeTargetIndexGrid(startX, startY, getOtherEntries());
 
       let scrollDir = 0, rafId = null;
+      /* Finger position as of the last real pointermove — cached so autoScrollLoop can recompute
+         the drag transform on its own every frame too, not just when onMove happens to fire. See
+         updateDragTransform's comment below for why that matters. */
+      let lastPointerX = startX, lastPointerY = startY;
+      /* Shared by onMove and autoScrollLoop so the compensating transform is recalculated on
+         every single frame autoscroll actually moves the container — not just on pointermove
+         events. Previously this only ran inside onMove, so holding the finger still near an edge
+         (letting autoscroll run on its own via the independent rAF loop below) left the transform
+         frozen at its last computed value while the container kept scrolling out from under it —
+         the tile would visibly lag/stick in place for however long the finger stayed still, then
+         snap back to the correct position all at once the next time a pointermove happened to
+         fire. Recomputing here too, using the latest actual scroll position every frame, keeps it
+         glued to the finger continuously instead. */
+      function updateDragTransform(){
+        const scrollDelta = (portrait ? filmstripEl.scrollTop : filmstripEl.scrollLeft) - dragStartScroll;
+        const dx = lastPointerX - startX, dy = lastPointerY - startY;
+        const adjDx = portrait ? dx : dx + scrollDelta;
+        const adjDy = portrait ? dy + scrollDelta : dy;
+        tileEl.style.transform = 'translate(' + adjDx + 'px,' + adjDy + 'px) scale(1.08)';
+      }
       function autoScrollLoop(){
         if(scrollDir !== 0){
           if(portrait) filmstripEl.scrollTo({ top: filmstripEl.scrollTop + scrollDir * 14, behavior: 'instant' });
           else filmstripEl.scrollTo({ left: filmstripEl.scrollLeft + scrollDir * 14, behavior: 'instant' });
+          updateDragTransform();
         }
         rafId = requestAnimationFrame(autoScrollLoop);
       }
@@ -2001,14 +2088,8 @@
       function onMove(ev){
         if(ev.pointerId !== pointerId) return;
         ev.preventDefault();
-        /* The tile stays put in the grid (only visually offset via transform), so container
-           autoscroll moves the underlying grid on its own; compensate the manual translate by
-           that same scroll delta so the tile doesn't drift away from the finger. */
-        const scrollDelta = (portrait ? filmstripEl.scrollTop : filmstripEl.scrollLeft) - dragStartScroll;
-        const dx = ev.clientX - startX, dy = ev.clientY - startY;
-        const adjDx = portrait ? dx : dx + scrollDelta;
-        const adjDy = portrait ? dy + scrollDelta : dy;
-        tileEl.style.transform = 'translate(' + adjDx + 'px,' + adjDy + 'px) scale(1.08)';
+        lastPointerX = ev.clientX; lastPointerY = ev.clientY;
+        updateDragTransform();
         currentTarget = computeTargetIndexGrid(ev.clientX, ev.clientY, getOtherEntries());
 
         const contRect = filmstripEl.getBoundingClientRect();
@@ -2193,6 +2274,13 @@
     wrap.innerHTML = '';
     const lines = getRichLinesForCut(cut);
     lines.forEach((html, i) => wrap.appendChild(buildLineDiv(cut, wrap, i, html)));
+    /* Blank ruled space below the last line — see .notes-lines-filler's CSS comment. Appended
+       here (rather than only in buildNotesLines) so every caller that rebuilds a wrap's lines
+       (the expand overlay's own wrap, and the compact card's wrap after syncing back from it)
+       gets it too, instead of it only existing on first build and vanishing on any resync. */
+    const filler = document.createElement('div');
+    filler.className = 'notes-lines-filler';
+    wrap.appendChild(filler);
   }
 
   function buildNotesLines(cut){
@@ -2295,8 +2383,12 @@
     while(i >= 0 && stripTagsToText(lines[i].innerHTML).trim() === ''){ emptyCount++; i--; }
     const excess = emptyCount - 1;
     if(excess > 0 && lines.length - excess >= MIN_LINES){
+      /* wrap's actual last child is now always .notes-lines-filler (the blank ruled-space filler
+         appended in buildLinesInto), not a .note-line — removing wrap.lastElementChild directly
+         would delete that filler instead of a trailing empty line. Removing the last *line*
+         elements by reference instead, from the already-collected lines array, sidesteps that. */
       for(let k = 0; k < excess; k++){
-        const last = wrap.lastElementChild;
+        const last = lines[lines.length - 1 - k];
         if(!last || document.activeElement === last) break;
         wrap.removeChild(last);
       }
@@ -2557,16 +2649,42 @@
 
     let scrollDir = 0;
     let rafId = null;
+    /* Finger position as of the last real pointermove — cached so autoScrollLoop can recompute
+       the drag transform on its own every frame too, not just when onMove happens to fire. See
+       updateDragTransform's comment below for why that matters. */
+    let lastPointerX = startX, lastPointerY = startY;
+    /* Shared by onMove and autoScrollLoop so the compensating transform is recalculated on every
+       single frame autoscroll actually moves the container — not just on pointermove events.
+       Previously this only ran inside onMove, so holding the finger still near an edge (letting
+       autoscroll run on its own via the independent rAF loop below) left the transform frozen at
+       its last computed value while the container kept scrolling out from under it — the card
+       would visibly lag/stick in place for however long the finger stayed still, then snap back
+       to the correct position all at once the next time a pointermove happened to fire. Recomputing
+       here too, using the latest actual scroll position every frame, keeps it glued to the finger
+       continuously instead. */
+    function updateDragTransform(){
+      const dx = lastPointerX - startX, dy = lastPointerY - startY;
+      const scrollDelta = (portrait ? filmstripEl.scrollTop : filmstripEl.scrollLeft) - startScroll;
+      const adjDx = portrait ? dx : dx + scrollDelta;
+      const adjDy = portrait ? dy + scrollDelta : dy;
+      const primary = portrait ? adjDy : adjDx;
+      const rot = Math.max(-4, Math.min(4, primary / 40));
+      unitEl.style.transform = portrait
+        ? 'translate(' + (dx * 0.12) + 'px,' + adjDy + 'px) scale(1.035) rotate(' + rot + 'deg)'
+        : 'translate(' + adjDx + 'px,' + (dy * 0.12) + 'px) scale(1.035) rotate(' + rot + 'deg)';
+    }
     function autoScrollLoop(){
       if(scrollDir !== 0){
         if(portrait) filmstripEl.scrollTo({ top: filmstripEl.scrollTop + scrollDir * 14, behavior: 'instant' });
         else filmstripEl.scrollTo({ left: filmstripEl.scrollLeft + scrollDir * 14, behavior: 'instant' });
+        if(dragging) updateDragTransform();
       }
       rafId = requestAnimationFrame(autoScrollLoop);
     }
 
     function onMove(ev){
       if(ev.pointerId !== pointerId) return;
+      lastPointerX = ev.clientX; lastPointerY = ev.clientY;
       const dx = ev.clientX - startX, dy = ev.clientY - startY;
       if(!dragging && Math.hypot(dx, dy) > 7){
         dragging = true;
@@ -2574,18 +2692,7 @@
         if(!rafId) rafId = requestAnimationFrame(autoScrollLoop);
       }
       if(dragging){
-        /* The item stays in normal flow, so container autoscroll already moves it on its own
-           along the scrolling axis; compensate the manual translate by that same scroll delta
-           so it doesn't double-move and drift away from the finger. The other (damped) axis
-           never scrolls, so it's left as raw pointer movement. */
-        const scrollDelta = (portrait ? filmstripEl.scrollTop : filmstripEl.scrollLeft) - startScroll;
-        const adjDx = portrait ? dx : dx + scrollDelta;
-        const adjDy = portrait ? dy + scrollDelta : dy;
-        const primary = portrait ? adjDy : adjDx;
-        const rot = Math.max(-4, Math.min(4, primary / 40));
-        unitEl.style.transform = portrait
-          ? 'translate(' + (dx * 0.12) + 'px,' + adjDy + 'px) scale(1.035) rotate(' + rot + 'deg)'
-          : 'translate(' + adjDx + 'px,' + (dy * 0.12) + 'px) scale(1.035) rotate(' + rot + 'deg)';
+        updateDragTransform();
         const contRect = filmstripEl.getBoundingClientRect();
         const edge = 50;
         if(portrait){
@@ -2778,7 +2885,7 @@
          tracker to (re)discover it once scrolling settles. */
       jumpScrollSuppressed = true;
       clearTimeout(jumpScrollSuppressTimer);
-      lastViewedCutId = id;
+      markViewedCut(id);
       unit.scrollIntoView({ behavior: 'smooth', inline: portrait ? 'nearest' : 'center', block: portrait ? 'center' : 'nearest' });
       requestAnimationFrame(() => flashUnit(id));
     }
@@ -4353,50 +4460,77 @@
      This version keeps the same core idea (a symmetric window sees both sides of a point, so it
      doesn't cut corners the way a backward-only filter does) but applies it AS THE STROKE IS BEING
      DRAWN, continuously, via a short delay — not as a one-time pass at the end. A point is only
-     committed to currentStroke.points once PEN_WINDOW_RADIUS more raw samples have arrived after
-     it, at which point its final (symmetrically-smoothed) position is already fully determined and
-     never touched again. So there's no "live version" and "final version" to snap between — what's
-     drawn live *is* the final version, just revealed a few samples late. At native Pencil sampling
-     (~240Hz), that delay is on the order of PEN_WINDOW_RADIUS × ~4ms — a handful of milliseconds —
-     and the live-preview layer below (drawPenLivePreview) fills in that gap visually so it doesn't
-     read as lag. Exact stroke start/end are always anchored to the true raw touchdown/lift-up
-     position, matching the same convention every smoothing approach in this file has followed. */
+     committed to currentStroke.points once enough raw samples have arrived after it (see
+     PEN_POSITION_WINDOW_RADIUS / PEN_PRESSURE_WINDOW_RADIUS below — position and pressure use
+     different-width windows, so "enough" is however much the wider of the two needs), at which
+     point its final (symmetrically-smoothed) values are already fully determined and never touched
+     again. So there's no "live version" and "final version" to snap between — what's drawn live
+     *is* the final version, just revealed a few samples late. At native Pencil sampling (~240Hz),
+     that delay is on the order of radius × ~4ms — tens of milliseconds at most — and the live-
+     preview layer below (drawPenLivePreview) fills in that gap visually so it doesn't read as lag.
+     Exact stroke start/end position is always anchored to the true raw touchdown/lift-up point,
+     matching the same convention every smoothing approach in this file has followed; pressure at
+     those same two samples is NOT anchored the same way — see PEN_PRESSURE_WINDOW_RADIUS below
+     for why. */
   let penRawBuffer = null;      /* raw {x,y,pressure} samples for the CURRENT pen stroke, in order; null between strokes */
   let penCommittedCount = 0;    /* how many of penRawBuffer's samples already have a corresponding (finalized, never-revisited) point in currentStroke.points */
-  const PEN_WINDOW_RADIUS = 2;  /* samples of lookahead required before a point can be committed — see block comment above for why small is fine here */
-  const PEN_WINDOW_KERNEL = (function(radius){
+  const PEN_POSITION_WINDOW_RADIUS = 2; /* samples of lookahead for x/y — kept small deliberately: a wider window smooths sharper, but every extra sample of radius also rounds real corners a bit more, and 2 already gave a big win (~97px corner error down to ~11px) without needing anything more aggressive */
+  /* Pressure gets its OWN, much wider window than x/y. There's no equivalent "corner" concept for
+     pressure — the tradeoff that keeps PEN_POSITION_WINDOW_RADIUS small (wider = rounder real
+     corners) simply doesn't apply here, so there's no real cost to smoothing it hard. Sharing the
+     position kernel for pressure was too weak: hand pressure has its own moment-to-moment jitter,
+     and radius=2 wasn't enough to keep it from occasionally showing up as a stroke visibly (if
+     briefly) getting thicker mid-line for no drawn reason — width is driven straight off each
+     point's pressure in drawStroke's lineWidth calc, so any pressure spike that survives smoothing
+     is immediately visible as a width spike. A real deliberate pressure change (pressing harder on
+     purpose) still happens over a timescale much longer than this window, so it comes through fine. */
+  const PEN_PRESSURE_WINDOW_RADIUS = 10;
+  function gaussianWindowKernel(radius){
     const sigma = radius / 2;
     const k = [];
     for(let i = -radius; i <= radius; i++) k.push(Math.exp(-(i * i) / (2 * sigma * sigma)));
     return k;
-  })(PEN_WINDOW_RADIUS);
-  function penWindowedPoint(buffer, i, kernel){
+  }
+  const PEN_POSITION_KERNEL = gaussianWindowKernel(PEN_POSITION_WINDOW_RADIUS);
+  const PEN_PRESSURE_KERNEL = gaussianWindowKernel(PEN_PRESSURE_WINDOW_RADIUS);
+  function penWindowedValue(buffer, i, kernel, field){
     const radius = (kernel.length - 1) / 2;
-    let sx = 0, sy = 0, sp = 0, wtotal = 0;
+    let sum = 0, wtotal = 0;
     for(let k = -radius; k <= radius; k++){
       const idx = i + k;
       if(idx < 0 || idx >= buffer.length) continue; /* clipped near the buffer's own edges — no fake padding, just fewer samples averaged there */
       const w = kernel[k + radius];
-      sx += buffer[idx].x * w; sy += buffer[idx].y * w; sp += buffer[idx].pressure * w;
+      sum += buffer[idx][field] * w;
       wtotal += w;
     }
-    return { x: sx / wtotal, y: sy / wtotal, pressure: sp / wtotal };
+    return sum / wtotal;
   }
-  /* Pushes every raw sample that's now ready (has PEN_WINDOW_RADIUS samples of lookahead) into
-     currentStroke.points. Called after every pointermove batch (isFinal=false, only pushes what's
-     genuinely ready) and once more from endStroke (isFinal=true, flushes whatever's left using
-     however much lookahead actually exists — down to zero for the very last sample, which is
-     anchored exactly rather than windowed at all). */
+  /* x/y use the anchor-at-edges + narrow-window approach as before; pressure is ALWAYS windowed
+     (even at the anchored start/end sample) with the wider pressure kernel — there's no reason a
+     stroke's touchdown/lift-up instant should keep its raw, unsmoothed (and often noisiest, since
+     initial/final contact pressure tends to spike or dip) pressure sample when nothing about
+     preserving exact position applies to it. */
+  function penFinalPoint(buffer, i, anchorXY){
+    const x = anchorXY ? buffer[i].x : penWindowedValue(buffer, i, PEN_POSITION_KERNEL, 'x');
+    const y = anchorXY ? buffer[i].y : penWindowedValue(buffer, i, PEN_POSITION_KERNEL, 'y');
+    const pressure = penWindowedValue(buffer, i, PEN_PRESSURE_KERNEL, 'pressure');
+    return { x, y, pressure };
+  }
+  /* Pushes every raw sample that's now ready into currentStroke.points. "Ready" means enough
+     lookahead exists for BOTH windows — since pressure's window is wider, that's what actually
+     gates the commit delay now (the position window is already satisfied well before). Called
+     after every pointermove batch (isFinal=false, only pushes what's genuinely ready) and once
+     more from endStroke (isFinal=true, flushes whatever's left using however much lookahead
+     actually exists — down to zero for the very last sample, whose x/y is anchored exactly). */
   function drainReadyPenPoints(isFinal){
     if(!currentStroke || !penRawBuffer) return;
+    const lookaheadNeeded = Math.max(PEN_POSITION_WINDOW_RADIUS, PEN_PRESSURE_WINDOW_RADIUS);
     while(penCommittedCount < penRawBuffer.length){
       const i = penCommittedCount;
-      const hasFullLookahead = (i + PEN_WINDOW_RADIUS) < penRawBuffer.length;
+      const hasFullLookahead = (i + lookaheadNeeded) < penRawBuffer.length;
       if(!isFinal && !hasFullLookahead) break;
       const isLastSample = isFinal && i === penRawBuffer.length - 1;
-      const pt = isLastSample
-        ? { x: penRawBuffer[i].x, y: penRawBuffer[i].y, pressure: penRawBuffer[i].pressure } /* exact lift-up position */
-        : penWindowedPoint(penRawBuffer, i, PEN_WINDOW_KERNEL);
+      const pt = penFinalPoint(penRawBuffer, i, isLastSample);
       currentStroke.points.push(pt);
       penCommittedCount++;
     }

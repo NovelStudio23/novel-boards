@@ -10,14 +10,18 @@
   show up (this does NOT touch or delete anyone's saved projects; those live
   in localStorage, a completely separate storage from this cache).
 */
-const CACHE_VERSION = 'v37';
+const CACHE_VERSION = 'v40';
 const CACHE_NAME = `novel-boards-${CACHE_VERSION}`;
 
-// Everything the app needs to run fully offline. Single-file app, so this
-// is intentionally short — just the shell itself.
+// Everything the app needs to run fully offline. Single-file app, plus the
+// Android/TWA manifest + icons added for Play Store packaging (harmless to
+// iOS, which never requests these).
 const PRECACHE_URLS = [
   './',
-  './index.html'
+  './index.html',
+  './manifest.json',
+  './icon-192.png',
+  './icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
