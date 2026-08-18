@@ -1512,6 +1512,29 @@
          the window where a second rotation, started quickly, could otherwise read a stale value. */
       lastSettledW = window.innerWidth; lastSettledH = window.innerHeight;
       markViewedCut(pendingOrientationRestoreId);
+      /* The notes-expand (long-press zoom) panel is centered via fixed left/top/width/height
+         pixel values computed once at open time — with nothing re-running that math on rotation,
+         it kept its pre-rotation position/size verbatim, which centered it for the OLD viewport
+         dimensions but not the new ones (visibly off to one side after rotating while it's open).
+         Repositioning here, in the same settled callback as the filmstrip restore above, rather
+         than in a separate listener — one settle point for everything that needs to react to the
+         viewport's new size. transition is suppressed the same way the main FLIP animations in
+         this file always do before a snap-into-place (see e.g. animateEditorFrameClose): forced
+         off, forced reflow, then restored, so this reads as an instant re-center rather than a
+         0.32s slide/resize competing visually with the OS's own rotation animation. */
+      if(expandedCutId){
+        const prevTransition = notesExpandPanel.style.transition;
+        notesExpandPanel.style.transition = 'none';
+        repositionNotesExpandPanel();
+        void notesExpandPanel.offsetWidth;
+        notesExpandPanel.style.transition = prevTransition;
+      }
+      /* Same idea for the fullscreen pencil editor's canvas: rotating changes .editor-frame-inner's
+         laid-out CSS size (it fills as much of the new viewport as the 1.85 aspect ratio allows),
+         so the HiDPI buffer sized for the old orientation is now either needlessly oversized or
+         (worse) undersized for the new display size — resize it to match, which also repaints at
+         the new resolution via its own redrawEditor() call. */
+      if(editorModal.classList.contains('open')) resizeEditorCanvasForDPI();
     }, 120);
   }
   window.addEventListener('resize', handleOrientationSignal);
@@ -2491,6 +2514,17 @@
     });
   }
 
+  function repositionNotesExpandPanel(){
+    const margin = 26;
+    const targetW = Math.min(window.innerWidth - margin * 2, 620);
+    const targetH = Math.min(window.innerHeight - margin * 2 - 30, 780);
+    const targetLeft = (window.innerWidth - targetW) / 2;
+    const targetTop = (window.innerHeight - targetH) / 2;
+    notesExpandPanel.style.left = targetLeft + 'px';
+    notesExpandPanel.style.top = targetTop + 'px';
+    notesExpandPanel.style.width = targetW + 'px';
+    notesExpandPanel.style.height = targetH + 'px';
+  }
   function openNotesExpand(cut, notesWrap, sourceRect){
     expandedCutId = cut.id;
     if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
@@ -2499,12 +2533,6 @@
 
     buildLinesInto(cut, notesExpandLines);
     syncFormatButtonsUI();
-
-    const margin = 26;
-    const targetW = Math.min(window.innerWidth - margin * 2, 620);
-    const targetH = Math.min(window.innerHeight - margin * 2 - 30, 780);
-    const targetLeft = (window.innerWidth - targetW) / 2;
-    const targetTop = (window.innerHeight - targetH) / 2;
 
     notesExpandPanel.style.transition = 'none';
     notesExpandPanel.style.left = sourceRect.left + 'px';
@@ -2516,10 +2544,7 @@
     void notesExpandPanel.offsetWidth;
     notesExpandPanel.style.transition = '';
     requestAnimationFrame(() => {
-      notesExpandPanel.style.left = targetLeft + 'px';
-      notesExpandPanel.style.top = targetTop + 'px';
-      notesExpandPanel.style.width = targetW + 'px';
-      notesExpandPanel.style.height = targetH + 'px';
+      repositionNotesExpandPanel();
     });
   }
 
@@ -4431,6 +4456,55 @@
 
   editorCanvas.width = CANVAS_W;
   editorCanvas.height = CANVAS_H;
+  /* HiDPI (Retina) canvas rendering. The canvas's own internal pixel buffer was previously fixed
+     at exactly CANVAS_W x CANVAS_H (1332x720) regardless of how large the browser actually
+     displayed it — #editorCanvas is CSS-sized to fill .editor-frame-inner (width/height:100%),
+     which itself grows to fill as much of the fullscreen viewport as the 1.85 aspect ratio
+     allows. On any Retina display (devicePixelRatio 2+, which is every iPad), that CSS box is
+     rendered at 2x+ the buffer's own pixel dimensions, so the browser has to upscale the bitmap
+     to fill it — exactly what shows up as a slightly grainy/aliased surface on stroke edges,
+     worse on curves and diagonals than on axis-aligned lines.
+     Standard fix: give the canvas a LARGER internal buffer (CSS display size × devicePixelRatio,
+     recomputed on resize below) while telling the 2D context to scale everything it draws by that
+     same factor — so the buffer itself has enough real pixels to render crisply, but every
+     drawing call in this file keeps working in exactly the same logical CANVAS_W x CANVAS_H
+     coordinate space it always has (toLocalPoint, stroke points, photo transforms, guide lines —
+     none of that needed to change, or even know this exists). Uses offsetWidth/offsetHeight
+     (post-layout, pre-transform box size) rather than getBoundingClientRect() specifically
+     because openEditor's FLIP grow-in animation visually scales the frame via CSS transform —
+     getBoundingClientRect() would report whatever mid-animation size that transform happens to
+     produce at the moment this runs, sizing the buffer for a transient small/large rect instead
+     of the frame's real, stable, laid-out size; offsetWidth/offsetHeight are unaffected by
+     transform and always reflect that real size immediately, animation or not. */
+  function resizeEditorCanvasForDPI(){
+    const w = editorCanvas.offsetWidth, h = editorCanvas.offsetHeight;
+    if(w < 1 || h < 1) return; /* not laid out yet (e.g. modal still display:none) — leave the default CANVAS_W x CANVAS_H buffer from above in place */
+    const dpr = window.devicePixelRatio || 1;
+    const newW = Math.round(w * dpr), newH = Math.round(h * dpr);
+    if(editorCanvas.width === newW && editorCanvas.height === newH) return; /* avoid a pointless clear+redraw when nothing actually changed */
+    editorCanvas.width = newW;
+    editorCanvas.height = newH;
+    /* Changing .width/.height always resets the context (bitmap cleared, transform reset to
+       identity) — reapply the scale immediately, then repaint from the actual stroke/photo data
+       (never from the now-blank bitmap), or the drawing would visibly vanish for a frame. */
+    const scale = newW / CANVAS_W; /* == newH / CANVAS_H — the CSS aspect-ratio:1.85 on .editor-frame-inner keeps these equal */
+    ectx.setTransform(scale, 0, 0, scale, 0, 0);
+    redrawEditor();
+  }
+  /* Dedicated offscreen canvas for flattenToDataURL, always exactly CANVAS_W x CANVAS_H — kept
+     completely separate from editorCanvas's own (now HiDPI-scaled, larger) buffer. flattenToDataURL
+     positions the photo using canvas.width/canvas.height directly (not the CANVAS_W/CANVAS_H
+     constants renderFrameCanvas uses), which only gives the right answer when those are one and
+     the same; passing it editorCanvas's own now-larger buffer would both mis-scale the flattened
+     photo and bloat every saved cut.image by the same factor, which matters here since that's
+     stored straight into localStorage's fairly tight quota. Keeping the saved/flattened image at
+     its original resolution and reserving the HiDPI upgrade for the live on-screen canvas only
+     avoids both problems — it's also the correct scope for the fix, since the blurriness this was
+     ever about was specifically the live drawing surface, not the saved thumbnail. */
+  const flattenCanvas = document.createElement('canvas');
+  flattenCanvas.width = CANVAS_W;
+  flattenCanvas.height = CANVAS_H;
+  const flattenCtx = flattenCanvas.getContext('2d');
 
   const editorState = { cutId: null, baseImage: null, photoDataURL: null, strokes: [], actions: [], redoActions: [], tool: 'pen', color: '#221F1C', size: 8, photoTransform: { scale: 1, offsetX: 0, offsetY: 0 } };
   let editorEraserType = 'object'; /* 'object' | 'pixel' */
@@ -4516,6 +4590,48 @@
     const pressure = penWindowedValue(buffer, i, PEN_PRESSURE_KERNEL, 'pressure');
     return { x, y, pressure };
   }
+  /* Ensures no two consecutive COMMITTED points are ever farther apart than
+     PEN_MAX_SEGMENT_SPACING, inserting linearly-interpolated points between them when they
+     would be. This targets a specific, previously-diagnosed drawStroke rendering artifact:
+     each curve segment is stroked as its own separate ctx.stroke() call with round caps (see
+     drawStroke's block comment — deliberately never touched, a full rewrite of that technique
+     was tried once and made things worse), and at a sharp enough angle between two consecutive
+     segments those round caps don't blend invisibly — they bulge, like a small dot of pooled
+     ink sitting right at the joint. The window smoothing above intentionally does NOT erase real
+     curvature (that's what keeps corners accurate), so a genuinely sharp bend in the gesture is
+     still a sharp bend in the committed points — but at native ~240Hz sampling, a FAST stroke
+     covers proportionally more distance between samples than a slow one, meaning the two committed
+     points straddling a real bend end up farther apart, so the segment approximating that bend has
+     to turn through a wider angle in one hop. That's what made this speed-dependent and specific
+     to "large bends drawn fast" rather than a constant, everywhere-the-same artifact.
+     A straight-line interpolation between two already-final points is a safe, principled way to
+     add resolution: it can only ever straighten a segment slightly (moving points already on, or
+     essentially on, the real path even closer to a true straight line between them can't
+     introduce new curvature), never distort the actual gesture, and — critically — it only ever
+     operates on points that are already fully committed and will never change again, so it stays
+     inside the same continuous, live pipeline as everything else here with nothing to snap
+     between "live" and "final". */
+  const PEN_MAX_SEGMENT_SPACING = 16; /* canvas px — chosen against a worst-case real sampling estimate, not the fixed test-harness gaps below: Apple Pencil samples at ~240Hz even during a fast flick, and even an unusually fast ~1.5m/s flick across this canvas's physical size works out to roughly 25-30px between raw samples, not dramatically more — so this only needs to be somewhat below that to catch genuinely-sparse worst cases, not so small that it starts re-approximating an already-reasonably-sampled smooth curve as a series of straight facets (confirmed as a real failure mode when tested with only a literal handful of total samples for a whole stroke — unrealistically sparse for real 240Hz input, but informative: smaller isn't automatically safer here) */
+  let penLastCommittedPoint = null; /* the actual last point pushed to currentStroke.points, pre-interpolation-insertion — used only to measure gaps for the check above; null between strokes */
+  function pushResampledPoint(pt){
+    if(penLastCommittedPoint){
+      const dx = pt.x - penLastCommittedPoint.x, dy = pt.y - penLastCommittedPoint.y;
+      const dist = Math.hypot(dx, dy);
+      if(dist > PEN_MAX_SEGMENT_SPACING){
+        const steps = Math.ceil(dist / PEN_MAX_SEGMENT_SPACING);
+        for(let s = 1; s < steps; s++){
+          const t = s / steps;
+          currentStroke.points.push({
+            x: penLastCommittedPoint.x + dx * t,
+            y: penLastCommittedPoint.y + dy * t,
+            pressure: penLastCommittedPoint.pressure + (pt.pressure - penLastCommittedPoint.pressure) * t,
+          });
+        }
+      }
+    }
+    currentStroke.points.push(pt);
+    penLastCommittedPoint = pt;
+  }
   /* Pushes every raw sample that's now ready into currentStroke.points. "Ready" means enough
      lookahead exists for BOTH windows — since pressure's window is wider, that's what actually
      gates the commit delay now (the position window is already satisfied well before). Called
@@ -4531,7 +4647,7 @@
       if(!isFinal && !hasFullLookahead) break;
       const isLastSample = isFinal && i === penRawBuffer.length - 1;
       const pt = penFinalPoint(penRawBuffer, i, isLastSample);
-      currentStroke.points.push(pt);
+      pushResampledPoint(pt);
       penCommittedCount++;
     }
   }
@@ -4768,6 +4884,20 @@
     editorCutNumEl.textContent = shotLabelFor(cutId);
 
     if(!animateEditorFrameOpen(sourceEl)) editorModal.classList.add('open');
+    /* Size/scale the canvas for the current display now — offsetWidth/offsetHeight are already
+       correct at this point regardless of animateEditorFrameOpen's in-flight transform (see
+       resizeEditorCanvasForDPI's block comment above for why that distinction matters). Doing
+       this before any of the branches below call redrawEditor() means their very first paint is
+       already at full resolution, instead of painting once at the old size and immediately again. */
+    resizeEditorCanvasForDPI();
+    /* One more pass a couple paints later, same double-rAF "let layout settle" pattern used
+       elsewhere in this file (e.g. closeEditor's flatten timing) — .editor-frame-inner's actual
+       laid-out size can still shift very slightly after the call above (observed ~2% in testing,
+       not tied to animateEditorFrameOpen since this still happened even opening with no source
+       element and thus no in-flight FLIP transform) — catching it here means the canvas settles
+       at full sharpness immediately rather than staying very slightly under-resolved until the
+       next unrelated resize happens to trigger a recompute. */
+    requestAnimationFrame(() => requestAnimationFrame(() => resizeEditorCanvasForDPI()));
 
     /* editorStrokes/editorPhoto hold the still-editable, un-flattened drawing from the last
        time THIS cut was edited in the fullscreen editor — restoring them (instead of just
@@ -4918,7 +5048,7 @@
         const cut = state.cuts[editorState.cutId];
         if(cut){
           const hasContent = editorState.baseImage || editorState.strokes.length > 0;
-          cut.image = hasContent ? flattenToDataURL(ectx, editorState.baseImage, editorState.strokes, editorState.photoTransform) : null;
+          cut.image = hasContent ? flattenToDataURL(flattenCtx, editorState.baseImage, editorState.strokes, editorState.photoTransform) : null;
           /* Keep the live, still-editable drawing data around (separate from the flattened
              cut.image) so reopening the editor can restore individual strokes instead of one
              opaque picture — that's what object eraser needs to keep working. */
@@ -5209,6 +5339,7 @@
        starts at 1, not 0, to keep the buffer and the committed-points array index-aligned. */
     penRawBuffer = e.pointerType === 'pen' ? [{ x: p.x, y: p.y, pressure: p.pressure }] : null;
     penCommittedCount = e.pointerType === 'pen' ? 1 : 0;
+    penLastCommittedPoint = e.pointerType === 'pen' ? { x: p.x, y: p.y, pressure: p.pressure } : null;
     if(editorState.tool === 'eraser' && editorEraserType === 'object'){
       currentStroke = null;
       eraseSessionRemovals = [];
