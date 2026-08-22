@@ -687,6 +687,22 @@
   }
   .toast.show{ opacity:1; transform:translate(-50%,0); }
 
+  /* Unlike .toast (auto-dismisses after ~2s), this stays visible until either a subsequent save
+     succeeds (notifyStorageRecovered) or the person taps the dismiss button — losing data
+     silently is worse than a toast that's easy to miss, so this needs to actually persist. */
+  .storage-warning-banner{
+    position:fixed; left:50%; top:calc(env(safe-area-inset-top, 0px) + 8px); transform:translateX(-50%);
+    background:var(--danger); color:#fff; padding:9px 10px 9px 16px; border-radius:12px;
+    font-size:12.5px; font-weight:600; z-index:300; display:flex; align-items:center; gap:10px;
+    opacity:0; pointer-events:none; transition:opacity .2s ease; max-width:88vw;
+    box-shadow:0 4px 14px rgba(0,0,0,.35);
+  }
+  .storage-warning-banner.show{ opacity:1; pointer-events:auto; }
+  .storage-warning-banner button{
+    background:rgba(255,255,255,.22); border:none; color:#fff; border-radius:8px; width:22px; height:22px;
+    font-size:13px; line-height:1; flex:0 0 auto; display:flex; align-items:center; justify-content:center;
+  }
+
   .confirm-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.55); opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:250; }
   .confirm-backdrop.show{ opacity:1; pointer-events:auto; }
   .confirm-modal{
@@ -1008,6 +1024,10 @@
 </div>
 
 <div id="toast" class="toast"></div>
+<div id="storageWarningBanner" class="storage-warning-banner">
+  <span id="storageWarningText">Couldn't save — storage may be full</span>
+  <button id="storageWarningDismiss" aria-label="Dismiss">✕</button>
+</div>
 
 <div class="select-toolbar" id="selectToolbar">
   <button id="selectAllBtn" class="select-all-btn">
@@ -1140,6 +1160,26 @@
   const hasLocalStorage = !hasClaudeStorage && lsAvailable();
   const LS_PREFIX = 'storyboard-app:';
 
+  let storageFailureShown = false;
+  /* Shows the persistent storage-warning banner (see its CSS comment for why this needs to be
+     more durable than the auto-dismissing toast). Safe to call on every single failed save —
+     it's just a class toggle, not spammy, and re-calling it while already shown is a no-op. */
+  function notifyStorageFailure(){
+    storageFailureShown = true;
+    const banner = document.getElementById('storageWarningBanner');
+    if(banner) banner.classList.add('show');
+  }
+  /* Called on every successful save — cheap no-op unless the banner is actually showing, in
+     which case a save going through again means whatever was blocking storage has cleared. */
+  function notifyStorageRecovered(){
+    if(!storageFailureShown) return;
+    storageFailureShown = false;
+    const banner = document.getElementById('storageWarningBanner');
+    if(banner) banner.classList.remove('show');
+  }
+  document.getElementById('storageWarningDismiss').addEventListener('click', () => {
+    document.getElementById('storageWarningBanner').classList.remove('show');
+  });
   async function storGet(key){
     if(hasClaudeStorage){
       try{ const r = await window.storage.get(key, false); return r ? r.value : null; }catch(e){ return null; }
@@ -1151,21 +1191,27 @@
   }
   async function storSet(key, value){
     if(hasClaudeStorage){
-      try{ await window.storage.set(key, value, false); }catch(e){ console.error('storage set failed', key, e); }
-      return;
+      try{ await window.storage.set(key, value, false); notifyStorageRecovered(); return true; }
+      catch(e){ console.error('storage set failed', key, e); notifyStorageFailure(); return false; }
     }
     if(hasLocalStorage){
-      try{ localStorage.setItem(LS_PREFIX + key, value); }catch(e){ console.error('localStorage set failed', key, e); }
+      try{ localStorage.setItem(LS_PREFIX + key, value); notifyStorageRecovered(); return true; }
+      catch(e){ console.error('localStorage set failed', key, e); notifyStorageFailure(); return false; }
     }
+    notifyStorageFailure();
+    return false;
   }
   async function storDelete(key){
     if(hasClaudeStorage){
-      try{ await window.storage.delete(key, false); }catch(e){ /* ignore */ }
-      return;
+      try{ await window.storage.delete(key, false); notifyStorageRecovered(); return true; }
+      catch(e){ notifyStorageFailure(); return false; }
     }
     if(hasLocalStorage){
-      try{ localStorage.removeItem(LS_PREFIX + key); }catch(e){ /* ignore */ }
+      try{ localStorage.removeItem(LS_PREFIX + key); notifyStorageRecovered(); return true; }
+      catch(e){ notifyStorageFailure(); return false; }
     }
+    notifyStorageFailure();
+    return false;
   }
   if(navigator.storage && navigator.storage.persist){
     navigator.storage.persist().catch(() => {});
@@ -3592,7 +3638,14 @@
   }
   async function permanentlyDeleteCuts(ids){
     if(ids.length === 0) return;
-    pushUndoSnapshot();
+    /* Deliberately NOT pushUndoSnapshot() here — both confirmation dialogs that lead to this
+       promise the deletion "cannot be undone", but pushUndoSnapshot() would put it right back on
+       the global Undo stack, letting the toolbar Undo button both restore the "deleted" cuts AND
+       (via persistWholeState) re-save them to storage — the opposite of what was promised. Still
+       clear the redo stack and refresh the buttons: any state-changing action should invalidate
+       whatever used to be redoable, undoable-or-not. */
+    redoStackGlobal = [];
+    updateUndoRedoButtons();
     ids.forEach(id => {
       const oIdx = state.order.indexOf(id);
       if(oIdx !== -1) state.order.splice(oIdx, 1);
@@ -4372,6 +4425,80 @@
   document.getElementById('importBtn').addEventListener('click', () => {
     document.getElementById('importInput').click();
   });
+  async function importBackupBundle(bundle){
+    if(!bundle || !Array.isArray(bundle.projects) || !bundle.projectData){
+      showToast("That file doesn't look like a valid backup");
+      return false;
+    }
+    if(bundle.projects.length === 0){
+      showToast('That backup has no projects — nothing to restore');
+      return false;
+    }
+    const ok = await showConfirm("This replaces everything currently in the app with this backup. This can't be undone.", 'Restore');
+    if(!ok) return false;
+
+    /* Load every existing project's data first (some may only exist in storage, not yet in
+       projectDataCache, if background preload hasn't reached them) — needed below to know the
+       complete old cut list for orphan cleanup. oldProjectDataCache is the same object
+       projectDataCache currently points to; ensureProjectLoaded mutates it in place, so reading
+       from this reference after the awaits below still sees everything it loaded. */
+    const oldProjects = projects.slice();
+    const oldProjectDataCache = projectDataCache;
+    await Promise.all(oldProjects.map(p => ensureProjectLoaded(p.id)));
+
+    /* Whole projects that existed before but aren't in the new backup: delete all their
+       storage (meta/order/trash/every cut), not just drop them from the in-memory list —
+       otherwise they're orphaned in storage forever, invisible but still taking up space. */
+    const newProjectIds = new Set(bundle.projects.map(p => p.id));
+    const orphanedProjectIds = oldProjects.map(p => p.id).filter(id => !newProjectIds.has(id));
+    await Promise.all(orphanedProjectIds.map(async pid => {
+      const cached = oldProjectDataCache[pid];
+      const cutIds = cached ? Object.keys(cached.cuts || {}) : [];
+      await Promise.all(cutIds.map(cid => storDelete('project:' + pid + ':cut:' + cid)));
+      await storDelete('project:' + pid + ':meta');
+      await storDelete('project:' + pid + ':order');
+      await storDelete('project:' + pid + ':trash');
+    }));
+
+    /* Fresh cache — otherwise any project or cut absent from this backup would keep showing
+       its old in-memory data even though its storage was just deleted above (or, for a kept
+       project whose cut list shrank, its removed cuts would still render from stale cache). */
+    projectDataCache = {};
+
+    for(const p of bundle.projects){
+      const data = bundle.projectData[p.id];
+      if(!data) continue;
+      const newCuts = data.cuts || {};
+      /* Same orphan cleanup as above, one level down: a project that's kept (same id, both
+         old and new) can still have individual cuts that existed before but aren't in this
+         backup's data for it. */
+      const oldCached = oldProjectDataCache[p.id];
+      if(oldCached && oldCached.cuts){
+        const newCutIds = new Set(Object.keys(newCuts));
+        const orphanedCutIds = Object.keys(oldCached.cuts).filter(cid => !newCutIds.has(cid));
+        await Promise.all(orphanedCutIds.map(cid => storDelete('project:' + p.id + ':cut:' + cid)));
+      }
+      await saveMetaFor(p.id, data.title || p.title);
+      await saveOrderFor(p.id, data.order || []);
+      await saveTrashOrderFor(p.id, data.trashOrder || []);
+      await Promise.all(Object.keys(newCuts).map(cid => saveCutFor(p.id, cid, newCuts[cid])));
+      projectDataCache[p.id] = { title: data.title || p.title, order: data.order || [], trashOrder: data.trashOrder || [], cuts: newCuts };
+    }
+    projects = bundle.projects;
+    await saveProjectsIndex();
+    currentProjectId = projects[0].id;
+    appMode = 'main';
+    exitSelectMode();
+    resetUndoHistory();
+    await storSet('active-project', currentProjectId);
+    state = projectDataCache[currentProjectId];
+    syncModeUI();
+    renderFilmstrip();
+    renderSidebar();
+    showToast('Backup restored');
+    return true;
+  }
+
   document.getElementById('importInput').addEventListener('change', async e => {
     const file = e.target.files && e.target.files[0];
     e.target.value = '';
@@ -4379,36 +4506,7 @@
     try{
       const text = await file.text();
       const bundle = JSON.parse(text);
-      if(!bundle || !Array.isArray(bundle.projects) || !bundle.projectData){
-        showToast("That file doesn't look like a valid backup");
-        return;
-      }
-      const ok = await showConfirm("This replaces everything currently in the app with this backup. This can't be undone.", 'Restore');
-      if(!ok) return;
-      for(const p of bundle.projects){
-        const data = bundle.projectData[p.id];
-        if(!data) continue;
-        await saveMetaFor(p.id, data.title || p.title);
-        await saveOrderFor(p.id, data.order || []);
-        await saveTrashOrderFor(p.id, data.trashOrder || []);
-        const cuts = data.cuts || {};
-        await Promise.all(Object.keys(cuts).map(cid => saveCutFor(p.id, cid, cuts[cid])));
-        projectDataCache[p.id] = { title: data.title || p.title, order: data.order || [], trashOrder: data.trashOrder || [], cuts: cuts };
-      }
-      projects = bundle.projects;
-      await saveProjectsIndex();
-      currentProjectId = projects.length ? projects[0].id : null;
-      appMode = 'main';
-      exitSelectMode();
-      resetUndoHistory();
-      if(currentProjectId){
-        await storSet('active-project', currentProjectId);
-        state = projectDataCache[currentProjectId];
-        syncModeUI();
-      }
-      renderFilmstrip();
-      renderSidebar();
-      showToast('Backup restored');
+      await importBackupBundle(bundle);
     }catch(err){
       showToast("Couldn't read that backup file");
     }
@@ -4845,6 +4943,11 @@
   }
   let movePointers = new Map(); /* pointerId -> {x,y} local canvas point, active while tool==='move' */
   let moveGestureStart = null;  /* snapshot of photoTransform + pointer positions at gesture start, for pan/pinch delta math */
+  /* Separate from moveGestureStart, which gets re-anchored mid-gesture whenever the finger count
+     changes (e.g. pinch-then-release-one-finger-and-keep-panning) — this instead holds the
+     transform from the true start of the whole gesture (first finger down after being fully at
+     rest), so one Undo action can be pushed for the whole gesture on release, not per re-anchor. */
+  let moveActionStartTransform = null;
   let photoLongPressTimer = null;
   let photoSelectShown = false;
 
@@ -5058,8 +5161,8 @@
      logic runs against are always the real, full dataURLs — undo/redo itself is completely
      unchanged and unaware this happens. Only the on-disk JSON gets smaller. Deliberately scoped to
      just this one field: cut.image (the flattened composite) is separate, legitimately-different
-     data and isn't touched, and the larger duplication in 'add' actions (whole stroke objects,
-     also present in editorStrokes) is a bigger piece of work left for a dedicated session. */
+     data and isn't touched. The larger duplication in 'add'/'erase' actions (whole stroke
+     objects, also present in editorStrokes) uses the same strategy — see the block below. */
   const PHOTO_ACTION_SENTINEL = '__CURRENT_PHOTO__';
   function compressPhotoActionsForStorage(actions, currentPhoto){
     if(!currentPhoto) return actions;
@@ -5079,6 +5182,55 @@
       if(copy.prevPhotoDataURL === PHOTO_ACTION_SENTINEL) copy.prevPhotoDataURL = currentPhoto;
       if(copy.newPhotoDataURL === PHOTO_ACTION_SENTINEL) copy.newPhotoDataURL = currentPhoto;
       return copy;
+    });
+  }
+
+  /* Same idea, for the bigger offender (#18): an 'add' action's strokeData is a full duplicate of
+     the same stroke object already sitting in editorStrokes for as long as that stroke hasn't
+     since been erased — every single stroke drawn duplicates its entire point array this way,
+     which adds up far faster than the photo case above ever could. An 'erase' action's removed[]
+     entries are the mirror case: duplicates of strokes NOT currently in editorStrokes (they were
+     just erased) — unless the erase itself later gets undone (moving the action to
+     editorRedoActions), which puts those exact strokes back into editorStrokes and makes that
+     copy compressible too. Both directions are checked fresh against the CURRENT editorStrokes
+     every time this runs, since which entries are compressible shifts as the user keeps
+     drawing/erasing/undoing/redoing within the same session — this isn't a one-time decision.
+     Deliberately scoped to just 'add' and 'erase' (the high-volume cases): 'clear' actions store a
+     bulk prevStrokes snapshot and 'transform' actions store before/after point snapshots, both of
+     which could in principle be compressed the same way, but they're comparatively rare (at most
+     a handful per session vs. potentially hundreds of strokes), so the added complexity isn't
+     worth it here — left as a possible follow-up, not attempted in this pass. */
+  const STROKE_ACTION_SENTINEL = '__CURRENT_STROKE__';
+  function compressStrokeActionsForStorage(actions, currentStrokes){
+    const byId = {};
+    currentStrokes.forEach(s => { byId[s.id] = true; });
+    return actions.map(a => {
+      if(a.type === 'add' && byId[a.strokeId]){
+        return Object.assign({}, a, { strokeData: STROKE_ACTION_SENTINEL });
+      }
+      if(a.type === 'erase' && Array.isArray(a.removed)){
+        const newRemoved = a.removed.map(entry => byId[entry.strokeId]
+          ? Object.assign({}, entry, { strokeData: STROKE_ACTION_SENTINEL })
+          : entry);
+        return Object.assign({}, a, { removed: newRemoved });
+      }
+      return a;
+    });
+  }
+  function hydrateStrokeActionsFromStorage(actions, currentStrokes){
+    const byId = {};
+    currentStrokes.forEach(s => { byId[s.id] = s; });
+    return actions.map(a => {
+      if(a.type === 'add' && a.strokeData === STROKE_ACTION_SENTINEL && byId[a.strokeId]){
+        return Object.assign({}, a, { strokeData: JSON.parse(JSON.stringify(byId[a.strokeId])) });
+      }
+      if(a.type === 'erase' && Array.isArray(a.removed)){
+        const newRemoved = a.removed.map(entry => (entry.strokeData === STROKE_ACTION_SENTINEL && byId[entry.strokeId])
+          ? Object.assign({}, entry, { strokeData: JSON.parse(JSON.stringify(byId[entry.strokeId])) })
+          : entry);
+        return Object.assign({}, a, { removed: newRemoved });
+      }
+      return a;
     });
   }
 
@@ -5103,8 +5255,13 @@
     /* Undo/redo history is restored right alongside the strokes themselves — otherwise the
        first thing anyone does after reopening (erase, then hit Undo) looks broken, since there'd
        be no record of anything to undo even though the drawing is sitting right there. */
-    editorState.actions = Array.isArray(cut.editorActions) ? hydratePhotoActionsFromStorage(JSON.parse(JSON.stringify(cut.editorActions)), cut.editorPhoto || null) : [];
-    editorState.redoActions = Array.isArray(cut.editorRedoActions) ? hydratePhotoActionsFromStorage(JSON.parse(JSON.stringify(cut.editorRedoActions)), cut.editorPhoto || null) : [];
+    const restoredStrokesForHydration = Array.isArray(cut.editorStrokes) ? JSON.parse(JSON.stringify(cut.editorStrokes)) : [];
+    editorState.actions = Array.isArray(cut.editorActions)
+      ? hydrateStrokeActionsFromStorage(hydratePhotoActionsFromStorage(JSON.parse(JSON.stringify(cut.editorActions)), cut.editorPhoto || null), restoredStrokesForHydration)
+      : [];
+    editorState.redoActions = Array.isArray(cut.editorRedoActions)
+      ? hydrateStrokeActionsFromStorage(hydratePhotoActionsFromStorage(JSON.parse(JSON.stringify(cut.editorRedoActions)), cut.editorPhoto || null), restoredStrokesForHydration)
+      : [];
     updateEditorUndoRedoButtons();
 
     editorCutNumEl.textContent = shotLabelFor(cutId);
@@ -5136,8 +5293,14 @@
       editorEmptyHint.style.display = 'none';
       editorState.photoDataURL = cut.editorPhoto;
       const img = new Image();
-      img.onload = () => { editorState.baseImage = img; if(restoreStrokes) editorState.strokes = restoreStrokes; redrawEditor(); };
-      img.onerror = () => { if(restoreStrokes) editorState.strokes = restoreStrokes; redrawEditor(); };
+      img.onload = () => {
+        if(editorState.cutId !== cutId) return; /* user switched to a different cut while this was decoding */
+        editorState.baseImage = img; if(restoreStrokes) editorState.strokes = restoreStrokes; redrawEditor();
+      };
+      img.onerror = () => {
+        if(editorState.cutId !== cutId) return;
+        if(restoreStrokes) editorState.strokes = restoreStrokes; redrawEditor();
+      };
       img.src = cut.editorPhoto;
     } else if(restoreStrokes && restoreStrokes.length > 0){
       editorState.strokes = restoreStrokes;
@@ -5148,8 +5311,11 @@
          flat background (object eraser has nothing to pick apart in this case). */
       editorEmptyHint.style.display = 'none';
       const img = new Image();
-      img.onload = () => { editorState.baseImage = img; redrawEditor(); };
-      img.onerror = () => { redrawEditor(); };
+      img.onload = () => {
+        if(editorState.cutId !== cutId) return; /* same stale-switch guard as above */
+        editorState.baseImage = img; redrawEditor();
+      };
+      img.onerror = () => { if(editorState.cutId === cutId) redrawEditor(); };
       img.src = cut.image;
     } else {
       redrawEditor();
@@ -5232,6 +5398,7 @@
     editorState.redoActions = [];
     applyPhotoState(null, null);
     updateEditorUndoRedoButtons();
+    autosaveEditorState();
   }
 
   function refreshTileImage(id){
@@ -5253,10 +5420,46 @@
     }
   }
 
+  /* Autosaves the live, restorable editing state periodically while the editor is open, so a
+     crash/reload/app-kill mid-session doesn't lose everything back to whatever was last saved at
+     Done. Deliberately does NOT recompute cut.image here (the flattened thumbnail) — that's a
+     real canvas-encode cost, only worth paying once, at actual close time; the thumbnail staying
+     one session behind after an interrupted session is a much smaller problem than losing the
+     actual editable content. Debounced via debouncedSaveCut, so calling this after every
+     completed gesture (not just occasionally) doesn't mean a write on every single one. */
+  function autosaveEditorState(){
+    if(!editorState.cutId) return;
+    const cut = state.cuts[editorState.cutId];
+    if(!cut) return;
+    cut.editorPhoto = editorState.photoDataURL || null;
+    cut.editorPhotoTransform = editorState.photoDataURL ? JSON.parse(JSON.stringify(editorState.photoTransform)) : null;
+    cut.editorStrokes = JSON.parse(JSON.stringify(editorState.strokes));
+    cut.editorActions = compressStrokeActionsForStorage(compressPhotoActionsForStorage(JSON.parse(JSON.stringify(editorState.actions)), cut.editorPhoto), editorState.strokes);
+    cut.editorRedoActions = compressStrokeActionsForStorage(compressPhotoActionsForStorage(JSON.parse(JSON.stringify(editorState.redoActions)), cut.editorPhoto), editorState.strokes);
+    debouncedSaveCut(cut.id);
+  }
+
   function closeEditor(commit){
     clearTimeout(photoLongPressTimer);
     hidePhotoSelectUI();
     clearSelection();
+
+    /* Snapshot everything the delayed save below needs, right now, synchronously — not inside
+       the delayed callback. editorState is a single shared object reused for every cut; if the
+       person taps to open a different cut before this fires (very plausible — two rAFs is only
+       a frame or two, easily beaten by a quick tap), openEditor() for that other cut resets
+       editorState.cutId/baseImage/strokes/etc. out from under this closure. Reading editorState
+       lazily inside the callback would then save THIS cut's data onto whatever cut is now open
+       (or worse, null out editorState.cutId for that other cut's already-active session — see
+       the guard at the very end of this function). Snapshotting now makes this closure immune
+       to anything that happens to editorState afterward, regardless of what the person does next. */
+    const closingCutId = editorState.cutId;
+    const snapshotBaseImage = editorState.baseImage;
+    const snapshotStrokes = JSON.parse(JSON.stringify(editorState.strokes));
+    const snapshotPhotoDataURL = editorState.photoDataURL;
+    const snapshotPhotoTransform = JSON.parse(JSON.stringify(editorState.photoTransform));
+    const snapshotActions = JSON.parse(JSON.stringify(editorState.actions));
+    const snapshotRedoActions = JSON.parse(JSON.stringify(editorState.redoActions));
 
     /* Kick the shrink animation off first, before any of the save/thumbnail work below, so Done
        feels instantly responsive instead of visibly waiting on a canvas encode + localStorage
@@ -5270,19 +5473,19 @@
     });
 
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      if(commit && editorState.cutId){
-        const cut = state.cuts[editorState.cutId];
+      if(commit && closingCutId){
+        const cut = state.cuts[closingCutId];
         if(cut){
-          const hasContent = editorState.baseImage || editorState.strokes.length > 0;
-          cut.image = hasContent ? flattenToDataURL(flattenCtx, editorState.baseImage, editorState.strokes, editorState.photoTransform) : null;
+          const hasContent = snapshotBaseImage || snapshotStrokes.length > 0;
+          cut.image = hasContent ? flattenToDataURL(flattenCtx, snapshotBaseImage, snapshotStrokes, snapshotPhotoTransform) : null;
           /* Keep the live, still-editable drawing data around (separate from the flattened
              cut.image) so reopening the editor can restore individual strokes instead of one
              opaque picture — that's what object eraser needs to keep working. */
-          cut.editorPhoto = editorState.photoDataURL || null;
-          cut.editorPhotoTransform = editorState.photoDataURL ? JSON.parse(JSON.stringify(editorState.photoTransform)) : null;
-          cut.editorStrokes = JSON.parse(JSON.stringify(editorState.strokes));
-          cut.editorActions = compressPhotoActionsForStorage(JSON.parse(JSON.stringify(editorState.actions)), cut.editorPhoto);
-          cut.editorRedoActions = compressPhotoActionsForStorage(JSON.parse(JSON.stringify(editorState.redoActions)), cut.editorPhoto);
+          cut.editorPhoto = snapshotPhotoDataURL || null;
+          cut.editorPhotoTransform = snapshotPhotoDataURL ? snapshotPhotoTransform : null;
+          cut.editorStrokes = snapshotStrokes;
+          cut.editorActions = compressStrokeActionsForStorage(compressPhotoActionsForStorage(snapshotActions, cut.editorPhoto), snapshotStrokes);
+          cut.editorRedoActions = compressStrokeActionsForStorage(compressPhotoActionsForStorage(snapshotRedoActions, cut.editorPhoto), snapshotStrokes);
           saveCut(cut.id);
           if(viewMode === 'tile'){
             refreshTileImage(cut.id);
@@ -5295,15 +5498,19 @@
                  settles, which is what let this specific card visibly pop in a beat late instead
                  of just being there already, right as the modal disappears. */
               const rec = unit._inline;
-              rec.baseImage = editorState.baseImage;
-              rec.strokes = editorState.strokes;
-              renderFrameCanvas(rec.ctx, rec.baseImage, rec.strokes, editorState.photoTransform);
+              rec.baseImage = snapshotBaseImage;
+              rec.strokes = snapshotStrokes;
+              renderFrameCanvas(rec.ctx, rec.baseImage, rec.strokes, snapshotPhotoTransform);
               unit._hintEl.style.display = hasContent ? 'none' : 'flex';
             }
           }
         }
       }
-      editorState.cutId = null;
+      /* Only clear editorState.cutId if it still refers to the cut THIS call was closing — if the
+         person has since opened a different cut, that cut's own editorState.cutId is what's
+         currently there, and clearing it here would silently break every autosave for it from
+         this point on (autosaveEditorState no-ops whenever editorState.cutId is falsy). */
+      if(editorState.cutId === closingCutId) editorState.cutId = null;
     }));
   }
   document.getElementById('editorCloseBtn').addEventListener('click', () => closeEditor(true));
@@ -5489,6 +5696,7 @@
         editorState.actions.push({ type: 'transform', before: beforeSnapshot, after: afterSnapshot });
         editorState.redoActions = [];
         updateEditorUndoRedoButtons();
+        autosaveEditorState();
       }
     }
     document.addEventListener('pointermove', onMove);
@@ -5527,6 +5735,12 @@
           offsetX: editorState.photoTransform.offsetX, offsetY: editorState.photoTransform.offsetY,
           scale: editorState.photoTransform.scale, anchor: p
         };
+        if(!moveActionStartTransform){
+          moveActionStartTransform = {
+            offsetX: editorState.photoTransform.offsetX, offsetY: editorState.photoTransform.offsetY,
+            scale: editorState.photoTransform.scale
+          };
+        }
         clearTimeout(photoLongPressTimer);
         const heldPointerId = e.pointerId;
         photoLongPressTimer = setTimeout(() => {
@@ -5680,7 +5894,22 @@
           scale: editorState.photoTransform.scale, anchor: remaining[1]
         };
       } else if(movePointers.size === 0){
+        if(moveActionStartTransform){
+          const before = moveActionStartTransform;
+          const after = editorState.photoTransform;
+          if(before.offsetX !== after.offsetX || before.offsetY !== after.offsetY || before.scale !== after.scale){
+            editorState.actions.push({
+              type: 'photo-transform',
+              prevTransform: { offsetX: before.offsetX, offsetY: before.offsetY, scale: before.scale },
+              newTransform: { offsetX: after.offsetX, offsetY: after.offsetY, scale: after.scale }
+            });
+            editorState.redoActions = [];
+            updateEditorUndoRedoButtons();
+            autosaveEditorState();
+          }
+        }
         moveGestureStart = null;
+        moveActionStartTransform = null;
       }
       return;
     }
@@ -5708,6 +5937,7 @@
     }
     eraseSessionRemovals = null;
     currentStroke = null;
+    autosaveEditorState();
   }
   editorCanvas.addEventListener('pointerup', endStroke);
   editorCanvas.addEventListener('pointercancel', endStroke);
@@ -5774,6 +6004,11 @@
       }
     } else if(action.type === 'photo-set'){
       applyPhotoState(action.prevPhotoDataURL, action.prevPhotoTransform);
+    } else if(action.type === 'photo-transform'){
+      editorState.photoTransform = JSON.parse(JSON.stringify(action.prevTransform));
+    } else if(action.type === 'clear'){
+      editorState.strokes = JSON.parse(JSON.stringify(action.prevStrokes));
+      applyPhotoState(action.prevPhotoDataURL, action.prevPhotoTransform);
     } else if(action.type === 'transform'){
       action.before.forEach(entry => {
         const s = editorState.strokes.find(st => st.id === entry.id);
@@ -5783,6 +6018,7 @@
     editorState.redoActions.push(action);
     updateEditorUndoRedoButtons();
     redrawEditor();
+    autosaveEditorState();
   });
   document.getElementById('redoBtn').addEventListener('click', () => {
     if(editorState.redoActions.length === 0) return;
@@ -5797,6 +6033,11 @@
       });
     } else if(action.type === 'photo-set'){
       applyPhotoState(action.newPhotoDataURL, action.newPhotoTransform);
+    } else if(action.type === 'photo-transform'){
+      editorState.photoTransform = JSON.parse(JSON.stringify(action.newTransform));
+    } else if(action.type === 'clear'){
+      editorState.strokes = [];
+      applyPhotoState(null, null);
     } else if(action.type === 'transform'){
       action.after.forEach(entry => {
         const s = editorState.strokes.find(st => st.id === entry.id);
@@ -5806,15 +6047,22 @@
     editorState.actions.push(action);
     updateEditorUndoRedoButtons();
     redrawEditor();
+    autosaveEditorState();
   });
   document.getElementById('clearBtn').addEventListener('click', () => {
-    editorState.strokes = [];
-    editorState.actions = [];
+    if(editorState.strokes.length === 0 && !editorState.photoDataURL) return; /* nothing to clear */
+    const prevStrokes = JSON.parse(JSON.stringify(editorState.strokes));
+    const prevPhotoDataURL = editorState.photoDataURL;
+    const prevPhotoTransform = JSON.parse(JSON.stringify(editorState.photoTransform));
+    editorState.actions.push({ type: 'clear', prevStrokes, prevPhotoDataURL, prevPhotoTransform });
     editorState.redoActions = [];
+    editorState.strokes = [];
     hidePhotoSelectUI();
     clearSelection();
+    applyPhotoState(null, null);
     updateEditorUndoRedoButtons();
     redrawEditor();
+    autosaveEditorState();
   });
 
 
@@ -5889,6 +6137,7 @@
         editorState.redoActions = [];
         updateEditorUndoRedoButtons();
         redrawEditor();
+        autosaveEditorState();
       };
       img.onerror = () => { showToast("Couldn't load that image"); };
       img.src = dataURL;
