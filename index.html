@@ -67,7 +67,7 @@
     *{ animation-duration:.001ms !important; transition-duration:.001ms !important; }
   }
 
-  #app{ height:100vh; height:100dvh; display:flex; flex-direction:column; }
+  #app{ height:100vh; height:100dvh; height:var(--app-height, 100dvh); display:flex; flex-direction:column; }
 
   /* ---------- Top bar ---------- */
   .topbar{
@@ -983,6 +983,12 @@
       <div class="sidebar-footer">
         <p class="sidebar-hint">Enter a scene number in each shot's SCENE field and it will appear here.</p>
         <div class="backup-row">
+          <button id="clearBlankShotsBtn" class="backup-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.5 6.5l2 2M15.5 15.5l2 2M6.5 17.5l2-2M15.5 8.5l2-2"/></svg>
+            <span>Clear Blank Shots</span>
+          </button>
+        </div>
+        <div class="backup-row">
           <button id="exportBtn" class="backup-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
             <span>Export Backup</span>
@@ -1245,6 +1251,23 @@
 <script>
 (function(){
   'use strict';
+
+  /* ===================== App height fix (iOS standalone gray bottom bar) ===================== */
+  /* #app's CSS height falls back through 100vh -> 100dvh -> var(--app-height). 100dvh alone is
+     usually enough in a normal Safari tab (it tracks the address bar collapsing/expanding), but
+     in standalone home-screen mode some iOS versions still compute it a few pixels short of the
+     true visual viewport, leaving a thin gray sliver at the bottom (visible only in standalone —
+     matches what Kevin's seeing, since a regular Safari tab never showed it). Setting an explicit
+     pixel height from window.innerHeight via JS is the standard, more reliable fix for this exact
+     class of bug — it doesn't replace the dvh fallback (still there for the instant before this
+     runs, and for any environment where JS is somehow delayed), just overrides it once available.
+     Re-run on resize/orientationchange since the safe-area allocation can shift between the two. */
+  function updateAppHeight(){
+    document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
+  }
+  updateAppHeight();
+  window.addEventListener('resize', updateAppHeight, { passive: true });
+  window.addEventListener('orientationchange', () => setTimeout(updateAppHeight, 50));
 
   /* ===================== Icons (dynamic) ===================== */
   const ICONS = {
@@ -3945,6 +3968,42 @@
     renderScenesList();
     renderTrashProjectsList();
   }
+
+  /* A "blank" shot has no drawn/attached content and no note text — genuinely nothing on it yet.
+     Checks editorStrokes/editorPhoto in addition to cut.image, since autosave (Session 5) can
+     leave real stroke/photo content sitting there even if the editor was never closed with Done
+     (the only thing that flattens content into cut.image) — a shot with unsaved in-progress
+     drawing should never be swept into Trash as "blank". */
+  function isCutBlank(cut){
+    if(!cut) return true;
+    const hasImage = !!cut.image;
+    const hasStrokes = Array.isArray(cut.editorStrokes) && cut.editorStrokes.length > 0;
+    const hasPhoto = !!cut.editorPhoto;
+    const hasNotes = getNotesPlainText(cut).trim().length > 0;
+    return !hasImage && !hasStrokes && !hasPhoto && !hasNotes;
+  }
+  /* Same batch-trash pattern as trashSelectedCuts above (frozenIdx snapshotted before the loop
+     starts, not per-iteration) — reversible via Trash/Put Back rather than a permanent delete,
+     consistent with every other bulk-removal entry point in the app. */
+  async function clearBlankShots(){
+    const blankIds = state.order.filter(id => isCutBlank(state.cuts[id]));
+    if(blankIds.length === 0){ showToast('No blank shots found'); return; }
+    const plural = blankIds.length === 1 ? '' : 's';
+    const ok = await showConfirm('Move ' + blankIds.length + ' blank shot' + plural + ' to Trash?', 'Move to Trash');
+    if(!ok) return;
+    pushUndoSnapshot();
+    const originalIndices = new Map(blankIds.map(id => [id, state.order.indexOf(id)]));
+    blankIds.forEach(id => moveCutToTrash(id, originalIndices.get(id)));
+    resortTrashOrder();
+    saveOrder();
+    saveTrashOrder();
+    blankIds.forEach(id => saveCut(id));
+    renumberAllScenesSequentially();
+    renderFilmstrip();
+    renderScenesList();
+    renderTrashProjectsList();
+    showToast(blankIds.length + ' blank shot' + plural + ' moved to Trash');
+  }
   function sortIdsByTrashOrder(ids){
     return ids.slice().sort((a, b) => {
       const ca = state.cuts[a], cb = state.cuts[b];
@@ -4791,6 +4850,7 @@
     };
   }
 
+  document.getElementById('clearBlankShotsBtn').addEventListener('click', () => { closeSidebar(); clearBlankShots(); });
   document.getElementById('exportBtn').addEventListener('click', async () => {
     try{
       const bundle = await gatherFullBackup();
