@@ -74,6 +74,7 @@
     flex:0 0 auto; display:flex; align-items:center; gap:8px;
     padding: max(12px, env(safe-area-inset-top)) 14px 12px;
     border-bottom:1px solid var(--line);
+    position:relative;
   }
   .icon-btn{
     width:38px; height:38px; border-radius:11px; flex:0 0 auto;
@@ -99,6 +100,41 @@
   }
   #projectTitle[contenteditable="false"]{ cursor:default; }
   .topbar-controls{ display:flex; align-items:center; gap:8px; flex:0 0 auto; }
+
+  #searchToggleBtn.active{ background:var(--bg-elevated-2); color:var(--accent); }
+
+  .search-panel{
+    position:absolute; top:100%; right:14px; margin-top:6px;
+    width:340px; max-width:calc(100vw - 28px); max-height:min(60vh, 480px);
+    background:var(--bg-elevated); border:1px solid var(--line-strong); border-radius:14px;
+    box-shadow:0 18px 40px rgba(0,0,0,.45); z-index:130;
+    display:flex; flex-direction:column; overflow:hidden;
+  }
+  .search-input-row{
+    flex:0 0 auto; display:flex; align-items:center; gap:8px;
+    padding:10px 10px 10px 14px; border-bottom:1px solid var(--line);
+  }
+  .search-input-icon{ width:17px; height:17px; color:var(--text-dim); flex:0 0 auto; }
+  #searchInput{
+    flex:1 1 auto; min-width:0; background:none; border:none; outline:none;
+    font-size:15px; color:var(--text);
+  }
+  #searchInput::placeholder{ color:var(--text-dim); }
+  .search-panel-close-btn{ width:30px; height:30px; }
+  .search-panel-close-btn svg{ width:15px; height:15px; }
+  .search-results{ flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .search-result-row{
+    display:flex; align-items:baseline; gap:10px; width:100%;
+    padding:10px 14px; text-align:left; border-bottom:1px solid var(--line);
+  }
+  .search-result-row:last-child{ border-bottom:none; }
+  .search-result-row:active{ background:var(--bg-elevated-2); }
+  .search-result-label{ flex:0 0 auto; font-weight:700; color:var(--accent); font-size:13.5px; }
+  .search-result-snippet{
+    flex:1 1 auto; min-width:0; color:var(--text-dim); font-size:13px;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .search-empty-row{ padding:16px 14px; color:var(--text-dim); font-size:13.5px; text-align:center; }
 
   .add-scene-btn{
     flex:0 0 auto; display:flex; align-items:center; gap:4px; padding:8px 12px; border-radius:17px; font-size:12.5px; font-weight:700;
@@ -210,6 +246,7 @@
   .sidebar-footer{ padding:12px 18px calc(16px + env(safe-area-inset-bottom)); font-size:11px; color:var(--text-faint); line-height:1.55; border-top:1px solid var(--line); flex:0 0 auto; }
   .sidebar-hint{ margin:0 0 10px; }
   .backup-row{ display:flex; gap:8px; }
+  .backup-row + .backup-row{ margin-top:8px; }
   .backup-btn{ flex:1 1 0; display:flex; align-items:center; justify-content:center; gap:5px; padding:8px 6px; border-radius:10px; border:1px solid var(--line-strong); color:var(--text-dim); font-size:11px; font-weight:700; }
   .backup-btn svg{ width:13px; height:13px; flex:0 0 auto; }
   .backup-btn:hover{ background:var(--bg-elevated-2); color:var(--text); }
@@ -428,14 +465,22 @@
      circle it otherwise inherits .select-circle's styling from. */
   .scene-select-circle{ width:20px; height:20px; }
   .scene-select-circle svg{ width:11px; height:11px; }
-  .delete-chip{
+  /* A short tap on the handle (vs. a drag) reveals this menu instead of the old single Trash
+     chip — same reveal mechanism (.cut-unit.menu-open), same pill width/style per row, just
+     stacked two rows deep now that there are two options instead of one. */
+  .handle-menu{
     display:none; position:absolute; left:50%; top:100%; transform:translateX(-50%); margin-top:4px;
-    align-items:center; gap:5px; height:26px; padding:0 11px; z-index:5;
-    border-radius:13px; background:var(--danger); color:#fff; font-size:12px; font-weight:700; white-space:nowrap;
+    flex-direction:column; gap:4px; z-index:5;
   }
-  .delete-chip:active{ transform:translateX(-50%) scale(.95); }
-  .delete-chip svg{ width:12px; height:12px; }
-  .cut-unit.menu-open .delete-chip{ display:inline-flex; }
+  .cut-unit.menu-open .handle-menu{ display:flex; }
+  .handle-menu-btn{
+    display:flex; align-items:center; justify-content:center; gap:5px; height:26px; padding:0 11px;
+    border-radius:13px; font-size:12px; font-weight:700; white-space:nowrap;
+  }
+  .handle-menu-btn:active{ transform:scale(.95); }
+  .handle-menu-btn svg{ width:12px; height:12px; }
+  .handle-menu-btn.duplicate-btn{ background:var(--bg-elevated-2); color:var(--text); border:1px solid var(--line-strong); }
+  .handle-menu-btn.trash-btn{ background:var(--danger); color:#fff; }
 
   .card{
     flex:1 1 auto; min-height:0; min-width:0; display:flex; flex-direction:column;
@@ -541,7 +586,16 @@
     flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
     padding:12px 16px; border-bottom:1px solid var(--paper-line); background:var(--paper);
   }
+  .notes-expand-header-left{ display:flex; align-items:center; gap:14px; min-width:0; }
   .notes-expand-header span{ font-family:var(--font-mono); font-size:12px; color:var(--ink-dim); letter-spacing:.05em; }
+  .notes-history-controls{ display:flex; align-items:center; gap:4px; flex:0 0 auto; }
+  .notes-history-btn{
+    width:26px; height:26px; border-radius:8px; flex:0 0 auto;
+    display:flex; align-items:center; justify-content:center; color:var(--ink-dim);
+  }
+  .notes-history-btn svg{ width:15px; height:15px; }
+  .notes-history-btn:hover{ background:var(--paper-line); }
+  .notes-history-btn.disabled{ opacity:.3; pointer-events:none; }
   .notes-expand-done{ padding:7px 15px; border-radius:16px; background:var(--accent); color:#fff; font-weight:700; font-size:12.5px; }
   .notes-expand-body{ flex:1 1 auto; min-height:0; }
 
@@ -549,6 +603,7 @@
     flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:12px;
     padding:9px 16px; border-bottom:3px solid var(--ink); background:var(--paper);
   }
+  .notes-format-left{ display:flex; align-items:center; gap:12px; min-width:0; }
   .notes-format-colors{ display:flex; align-items:center; gap:7px; }
   .notes-color-swatch{ width:22px; height:22px; border-radius:50%; border:2px solid transparent; padding:0; flex:0 0 auto; }
   .notes-color-swatch.active{ border-color:var(--ink-dim); }
@@ -558,7 +613,42 @@
     font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:center;
   }
   .notes-style-btn.active{ background:var(--accent); color:#fff; }
+  .notes-delete-all-btn{
+    flex:0 0 auto; padding:7px 13px; border-radius:14px; background:var(--danger); color:#fff;
+    font-size:12px; font-weight:700; white-space:nowrap;
+  }
   .note-line[data-placeholder]:empty::before{ content:attr(data-placeholder); color:var(--ink-dim); pointer-events:none; }
+
+  /* ---- PDF export overlay ---- */
+  .pdf-export-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.6); opacity:0; pointer-events:none; transition:opacity .25s ease; z-index:160; }
+  .pdf-export-backdrop.show{ opacity:1; pointer-events:auto; }
+  .pdf-export-panel{
+    position:fixed; left:50%; top:50%; transform:translate(-50%,-50%) scale(.96);
+    width:min(640px, 92vw); height:min(84vh, 820px); z-index:161;
+    background:var(--bg-elevated); border-radius:18px; overflow:hidden;
+    display:flex; flex-direction:column; box-shadow:0 30px 70px rgba(0,0,0,.5);
+    opacity:0; pointer-events:none; transition:opacity .22s ease, transform .22s ease;
+  }
+  .pdf-export-panel.show{ opacity:1; pointer-events:auto; transform:translate(-50%,-50%) scale(1); }
+  .pdf-export-header{
+    flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
+    padding:14px 16px; border-bottom:1px solid var(--line); font-weight:700; font-size:14px;
+  }
+  .pdf-layout-toggle{
+    flex:0 0 auto; display:flex; gap:8px; padding:10px 16px; border-bottom:1px solid var(--line);
+  }
+  .pdf-layout-btn{
+    flex:1 1 0; padding:9px 0; border-radius:10px; background:var(--bg-elevated-2);
+    border:1px solid var(--line-strong); color:var(--text-dim); font-size:13px; font-weight:700;
+  }
+  .pdf-layout-btn.active{ background:var(--accent); border-color:var(--accent); color:#fff; }
+  .pdf-preview-wrap{ flex:1 1 auto; min-height:0; background:#6b6b6e; }
+  #pdfPreviewFrame{ width:100%; height:100%; border:none; display:block; background:#6b6b6e; }
+  .pdf-export-footer{ flex:0 0 auto; padding:12px 16px; border-top:1px solid var(--line); }
+  .pdf-export-go-btn{
+    width:100%; padding:12px 0; border-radius:12px; background:var(--accent); color:#fff;
+    font-size:14.5px; font-weight:700;
+  }
 
   /* ---------- Editor modal (Frame drawing) ---------- */
   .editor-modal.no-slide-transition{ transition:none; }
@@ -819,6 +909,9 @@
       </button>
     </div>
     <div class="topbar-controls" id="topbarMainControls">
+      <button id="searchToggleBtn" class="icon-btn" aria-label="Search">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      </button>
       <button id="addSceneBtn" class="add-scene-btn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
         <span>Scene</span>
@@ -829,6 +922,16 @@
     <div class="topbar-controls" id="topbarTrashControls" style="display:none">
       <button id="trashSelectBtn" class="select-toggle-btn">Select</button>
       <button id="emptyTrashBtn" class="edit-toggle-btn">Empty</button>
+    </div>
+    <div class="search-panel" id="searchPanel" style="display:none">
+      <div class="search-input-row">
+        <svg class="search-input-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="searchInput" type="text" placeholder="Shot # or notes" autocomplete="off" autocapitalize="off" spellcheck="false">
+        <button id="searchClearBtn" class="icon-btn search-panel-close-btn" aria-label="Close search">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="search-results" id="searchResults"></div>
     </div>
   </header>
 
@@ -880,6 +983,12 @@
             <span>Import Backup</span>
           </button>
         </div>
+        <div class="backup-row">
+          <button id="exportPdfBtn" class="backup-btn">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M15 2v5h5"/></svg>
+            <span>Export PDF</span>
+          </button>
+        </div>
         <input type="file" id="importInput" accept="application/json,.json" hidden>
       </div>
     </aside>
@@ -903,27 +1012,60 @@
 <div class="notes-expand-backdrop" id="notesExpandBackdrop"></div>
 <div class="notes-expand-panel" id="notesExpandPanel">
   <div class="notes-expand-header">
-    <span id="notesExpandLabel">SHOT 01 — NOTES</span>
+    <div class="notes-expand-header-left">
+      <span id="notesExpandLabel">SHOT 01 — NOTES</span>
+      <div class="notes-history-controls">
+        <button id="notesUndoBtn" class="notes-history-btn disabled" aria-label="Undo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h9a5 5 0 0 1 0 10h-2M3 10l5-5M3 10l5 5"/></svg>
+        </button>
+        <button id="notesRedoBtn" class="notes-history-btn disabled" aria-label="Redo">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10h-9a5 5 0 0 0 0 10h2M21 10l-5-5M21 10l-5 5"/></svg>
+        </button>
+      </div>
+    </div>
     <button id="notesExpandDone" class="notes-expand-done">Done</button>
   </div>
   <div class="notes-format-toolbar" id="notesFormatToolbar">
-    <div class="notes-format-colors" id="notesColorSwatches">
-      <button class="notes-color-swatch active" data-color="#221F1C" style="background:#221F1C"></button>
-      <button class="notes-color-swatch" data-color="#E0502A" style="background:#E0502A"></button>
-      <button class="notes-color-swatch" data-color="#2E6BE0" style="background:#2E6BE0"></button>
-      <button class="notes-color-swatch" data-color="#2E9E4F" style="background:#2E9E4F"></button>
-      <button class="notes-color-swatch" data-color="#9B4FE0" style="background:#9B4FE0"></button>
-      <button class="notes-color-swatch" data-color="#9A9A9E" style="background:#9A9A9E"></button>
+    <div class="notes-format-left">
+      <div class="notes-format-colors" id="notesColorSwatches">
+        <button class="notes-color-swatch active" data-color="#221F1C" style="background:#221F1C"></button>
+        <button class="notes-color-swatch" data-color="#E0502A" style="background:#E0502A"></button>
+        <button class="notes-color-swatch" data-color="#2E6BE0" style="background:#2E6BE0"></button>
+        <button class="notes-color-swatch" data-color="#2E9E4F" style="background:#2E9E4F"></button>
+        <button class="notes-color-swatch" data-color="#9B4FE0" style="background:#9B4FE0"></button>
+        <button class="notes-color-swatch" data-color="#9A9A9E" style="background:#9A9A9E"></button>
+      </div>
+      <div class="notes-format-styles">
+        <button class="notes-style-btn" data-style="bold" title="Bold"><b>B</b></button>
+        <button class="notes-style-btn" data-style="italic" title="Italic"><i>I</i></button>
+        <button class="notes-style-btn" data-style="underline" title="Underline"><u>U</u></button>
+        <button class="notes-style-btn" data-style="strikethrough" title="Strikethrough"><s>S</s></button>
+      </div>
     </div>
-    <div class="notes-format-styles">
-      <button class="notes-style-btn" data-style="bold" title="Bold"><b>B</b></button>
-      <button class="notes-style-btn" data-style="italic" title="Italic"><i>I</i></button>
-      <button class="notes-style-btn" data-style="underline" title="Underline"><u>U</u></button>
-      <button class="notes-style-btn" data-style="strikethrough" title="Strikethrough"><s>S</s></button>
-    </div>
+    <button id="notesDeleteAllBtn" class="notes-delete-all-btn">Delete All</button>
   </div>
   <div class="notes-expand-body">
     <div class="notes-lines expanded" id="notesExpandLines"></div>
+  </div>
+</div>
+
+<div class="pdf-export-backdrop" id="pdfExportBackdrop"></div>
+<div class="pdf-export-panel" id="pdfExportPanel">
+  <div class="pdf-export-header">
+    <span>Export PDF</span>
+    <button id="pdfExportCloseBtn" class="icon-btn" aria-label="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+  </div>
+  <div class="pdf-layout-toggle" id="pdfLayoutToggle">
+    <button class="pdf-layout-btn active" data-layout="vertical">Vertical</button>
+    <button class="pdf-layout-btn" data-layout="horizontal">Horizontal</button>
+  </div>
+  <div class="pdf-preview-wrap">
+    <iframe id="pdfPreviewFrame" title="PDF preview"></iframe>
+  </div>
+  <div class="pdf-export-footer">
+    <button id="pdfExportGoBtn" class="pdf-export-go-btn">Export</button>
   </div>
 </div>
 
@@ -1090,6 +1232,7 @@
     plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
     grip: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
     trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2m-8 0 1 12a2 2 0 0 0 2 2h4a2 2 0 0 0 2-2l1-12"/></svg>',
+    duplicate: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>',
     pencil: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16.5 3.5 4 4L7 21H3v-4L16.5 3.5Z"/></svg>',
     film: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M7 5v14M17 5v14M3 9.5h4M3 14.5h4M17 9.5h4M17 14.5h4"/></svg>',
     check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 13l4 4L19 7"/></svg>',
@@ -1330,16 +1473,16 @@
 
   /* ===================== Toast ===================== */
   let toastTimer = null;
-  function showToast(msg){
+  function showToast(msg, duration){
     const el = document.getElementById('toast');
     el.textContent = msg;
     el.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+    toastTimer = setTimeout(() => el.classList.remove('show'), duration || 2200);
   }
 
   /* ===================== Confirm dialog (custom — window.confirm is unreliable in sandboxed iframes) ===================== */
-  function showConfirm(message, okLabel){
+  function showConfirm(message, okLabel, cancelLabel){
     return new Promise(resolve => {
       const backdrop = document.getElementById('confirmBackdrop');
       const modal = document.getElementById('confirmModal');
@@ -1347,6 +1490,7 @@
       const cancelBtn = document.getElementById('confirmCancelBtn');
       document.getElementById('confirmMessage').textContent = message;
       okBtn.textContent = okLabel || 'Delete';
+      cancelBtn.textContent = cancelLabel || 'Cancel';
       backdrop.classList.add('show');
       modal.classList.add('show');
       function cleanup(result){
@@ -1459,6 +1603,108 @@
   updateNavButtonsOrientation();
   window.addEventListener('resize', updateNavButtonsOrientation, { passive: true });
   window.addEventListener('resize', updateSelectToolbarSpacing, { passive: true });
+
+  /* ===================== Search (shot number or notes text, current project only) ===================== */
+  /* Scope is intentionally just the active project's visible shots — trash and other projects
+     require actually navigating there first (search box lives in topbarMainControls, which is
+     already hidden while in Trash, so this falls out naturally with no extra mode-check needed).
+     No manual "search by number vs text" toggle: a query is treated as a shot-number lookup only
+     when it's <digits><letters> with no space (e.g. "3B", "12AA") — a bare number with no letter
+     yet (e.g. "3") is searched as notes text instead, same as any other non-matching query. */
+  const SHOT_NUMBER_QUERY_RE = /^\d+[A-Za-z]+$/;
+  const searchToggleBtn = document.getElementById('searchToggleBtn');
+  const searchPanelEl = document.getElementById('searchPanel');
+  const searchInputEl = document.getElementById('searchInput');
+  const searchClearBtn = document.getElementById('searchClearBtn');
+  const searchResultsEl = document.getElementById('searchResults');
+
+  function getNotesPlainText(cut){
+    return (typeof cut.notesHtml === 'string' && cut.notesHtml) ? stripTagsToText(cut.notesHtml) : (cut.notes || '');
+  }
+  function runShotSearch(query){
+    const q = query.trim();
+    if(!q) return [];
+    const labels = computeMainShotLabels();
+    const results = [];
+    if(SHOT_NUMBER_QUERY_RE.test(q)){
+      const qUpper = q.toUpperCase();
+      state.order.forEach(id => {
+        const label = labels[id];
+        if(label && label.toUpperCase().startsWith(qUpper)) results.push({ id, label, snippet: null });
+      });
+    } else {
+      const qLower = q.toLowerCase();
+      state.order.forEach(id => {
+        const cut = state.cuts[id];
+        if(!cut) return;
+        const text = getNotesPlainText(cut);
+        if(text && text.toLowerCase().includes(qLower)) results.push({ id, label: labels[id] || '', snippet: text });
+      });
+    }
+    return results.slice(0, 40);
+  }
+  function renderSearchResults(query){
+    searchResultsEl.innerHTML = '';
+    if(!query.trim()) return;
+    const results = runShotSearch(query);
+    if(results.length === 0){
+      const empty = document.createElement('div');
+      empty.className = 'search-empty-row';
+      empty.textContent = 'No matches';
+      searchResultsEl.appendChild(empty);
+      return;
+    }
+    results.forEach(r => {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'search-result-row';
+      const labelSpan = document.createElement('span');
+      labelSpan.className = 'search-result-label';
+      labelSpan.textContent = r.label;
+      row.appendChild(labelSpan);
+      if(r.snippet){
+        const snippetSpan = document.createElement('span');
+        snippetSpan.className = 'search-result-snippet';
+        snippetSpan.textContent = r.snippet;
+        row.appendChild(snippetSpan);
+      }
+      row.addEventListener('click', () => {
+        closeSearch();
+        jumpToCut(r.id, { instant: true });
+      });
+      searchResultsEl.appendChild(row);
+    });
+  }
+  function isSearchOpen(){ return searchPanelEl.style.display === 'flex'; }
+  function openSearch(){
+    searchPanelEl.style.display = 'flex';
+    searchToggleBtn.classList.add('active');
+    searchInputEl.value = '';
+    searchResultsEl.innerHTML = '';
+    requestAnimationFrame(() => searchInputEl.focus());
+  }
+  function closeSearch(){
+    searchPanelEl.style.display = 'none';
+    searchToggleBtn.classList.remove('active');
+    searchInputEl.blur();
+  }
+  searchToggleBtn.addEventListener('click', () => { isSearchOpen() ? closeSearch() : openSearch(); });
+  searchClearBtn.addEventListener('click', closeSearch);
+  searchInputEl.addEventListener('input', () => renderSearchResults(searchInputEl.value));
+  searchInputEl.addEventListener('keydown', (e) => {
+    if(e.key === 'Escape'){ closeSearch(); }
+    else if(e.key === 'Enter'){
+      const first = searchResultsEl.querySelector('.search-result-row');
+      if(first) first.click();
+    }
+  });
+  /* Closes on any click outside the panel/toggle — covers switching projects, entering Trash,
+     toggling Edit/Select, etc. without needing a dedicated hook in each of those functions. */
+  document.addEventListener('click', (e) => {
+    if(!isSearchOpen()) return;
+    if(searchPanelEl.contains(e.target) || e.target === searchToggleBtn || searchToggleBtn.contains(e.target)) return;
+    closeSearch();
+  });
 
   /* ===================== Sidebar open/close ===================== */
   function openSidebar(){ sidebarEl.classList.add('open'); backdropEl.classList.add('show'); }
@@ -2376,11 +2622,22 @@
     handleRow.appendChild(badge);
 
     if(!isTrash){
-      const deleteChip = document.createElement('button');
-      deleteChip.className = 'delete-chip';
-      deleteChip.innerHTML = ICONS.trash + '<span>Trash</span>';
-      deleteChip.addEventListener('click', e => { e.stopPropagation(); deleteCut(cut.id); });
-      handleRow.appendChild(deleteChip);
+      const handleMenu = document.createElement('div');
+      handleMenu.className = 'handle-menu';
+
+      const duplicateBtn = document.createElement('button');
+      duplicateBtn.className = 'handle-menu-btn duplicate-btn';
+      duplicateBtn.innerHTML = ICONS.duplicate + '<span>Duplicate</span>';
+      duplicateBtn.addEventListener('click', e => { e.stopPropagation(); duplicateCut(cut.id); });
+      handleMenu.appendChild(duplicateBtn);
+
+      const trashBtn = document.createElement('button');
+      trashBtn.className = 'handle-menu-btn trash-btn';
+      trashBtn.innerHTML = ICONS.trash + '<span>Trash</span>';
+      trashBtn.addEventListener('click', e => { e.stopPropagation(); deleteCut(cut.id); });
+      handleMenu.appendChild(trashBtn);
+
+      handleRow.appendChild(handleMenu);
     }
 
     /* card */
@@ -2530,6 +2787,10 @@
     checkLineOverflow(cut, wrap, div);
     trimTrailingEmptyLines(wrap);
     syncNotesFromLines(cut, wrap);
+    if(wrap === notesExpandLines && expandedCutId === cut.id){
+      clearTimeout(notesHistoryTypingTimer);
+      notesHistoryTypingTimer = setTimeout(() => pushNotesHistoryCheckpoint(cut.notesHtml), NOTES_HISTORY_DEBOUNCE_MS);
+    }
   }
 
   /* ---- Auto-wrap: when a line's content no longer fits its box, push the overflow onto the
@@ -2687,6 +2948,75 @@
   const notesExpandLabel = document.getElementById('notesExpandLabel');
   let expandedCutId = null;
 
+  /* ---- Local Undo/Redo for the expand overlay only ---- */
+  /* Scoped to a single open session of this overlay — a lightweight safety net (mainly so Delete
+     All is recoverable), not a persisted history; reset every time the overlay opens/closes.
+     Snapshot-based (whole notesHtml strings) rather than action-based: notes are just marked-up
+     text with none of the nested stroke/photo state the fullscreen editor's undo has to track,
+     so whole-string snapshots are simpler and safer here than trying to diff contenteditable DOM
+     mutations. Typing is coalesced into one checkpoint per pause (like most text editors); a
+     discrete action (format button, Delete All) pushes its own checkpoint immediately. */
+  const notesUndoBtn = document.getElementById('notesUndoBtn');
+  const notesRedoBtn = document.getElementById('notesRedoBtn');
+  let notesHistory = [];
+  let notesHistoryIndex = -1;
+  let notesHistoryTypingTimer = null;
+  const NOTES_HISTORY_DEBOUNCE_MS = 500;
+
+  function resetNotesHistory(initialHtml){
+    notesHistory = [initialHtml || ''];
+    notesHistoryIndex = 0;
+    updateNotesHistoryButtons();
+  }
+  function pushNotesHistoryCheckpoint(html){
+    const normalized = html || '';
+    if(notesHistory[notesHistoryIndex] === normalized) return; /* nothing actually changed */
+    notesHistory = notesHistory.slice(0, notesHistoryIndex + 1);
+    notesHistory.push(normalized);
+    notesHistoryIndex = notesHistory.length - 1;
+    updateNotesHistoryButtons();
+  }
+  function updateNotesHistoryButtons(){
+    notesUndoBtn.classList.toggle('disabled', notesHistoryIndex <= 0);
+    notesRedoBtn.classList.toggle('disabled', notesHistoryIndex >= notesHistory.length - 1);
+  }
+  /* Rebuilds the DOM from a given notesHtml string and re-derives the canonical notesHtml/notes
+     mirror + saves, by routing through the same buildLinesInto/syncNotesFromLines pair every
+     other notes-writing path already uses — deliberately not hand-rolling a separate write path
+     here. Clearing cut.notes alongside an empty html avoids getRichLinesForCut's empty-notesHtml
+     fallback (which reads cut.notes) from resurrecting stale plain text after a Delete All or an
+     undo back past one. */
+  function applyNotesHtmlAndRebuild(cut, html){
+    cut.notesHtml = html || '';
+    if(!cut.notesHtml) cut.notes = '';
+    buildLinesInto(cut, notesExpandLines);
+    syncNotesFromLines(cut, notesExpandLines);
+  }
+  function applyNotesHistoryIndex(newIndex){
+    const cut = state.cuts[expandedCutId];
+    if(!cut) return;
+    notesHistoryIndex = newIndex;
+    applyNotesHtmlAndRebuild(cut, notesHistory[notesHistoryIndex]);
+    updateNotesHistoryButtons();
+  }
+  function commitNotesChange(cut, newHtml){
+    applyNotesHtmlAndRebuild(cut, newHtml);
+    pushNotesHistoryCheckpoint(cut.notesHtml);
+  }
+  notesUndoBtn.addEventListener('click', () => { if(notesHistoryIndex > 0) applyNotesHistoryIndex(notesHistoryIndex - 1); });
+  notesRedoBtn.addEventListener('click', () => { if(notesHistoryIndex < notesHistory.length - 1) applyNotesHistoryIndex(notesHistoryIndex + 1); });
+  document.getElementById('notesDeleteAllBtn').addEventListener('click', async () => {
+    if(!expandedCutId) return;
+    if(!editMode || appMode === 'trash' || selectMode) return; /* mirrors onLineInput's own editability guard */
+    const cut = state.cuts[expandedCutId];
+    if(!cut) return;
+    const ok = await showConfirm('Delete all notes for this shot?', 'Delete All');
+    if(!ok) return;
+    clearTimeout(notesHistoryTypingTimer);
+    pushNotesHistoryCheckpoint(cut.notesHtml); /* flush pre-delete state as its own undo step, in case a typing debounce was still pending */
+    commitNotesChange(cut, '');
+  });
+
   /* cut.notesHtml can come from an imported backup file, not just this app's own editor —
      strip it down to a small safe allowlist before ever assigning it via innerHTML. */
   function sanitizeRichHtml(html){
@@ -2770,6 +3100,7 @@
 
     buildLinesInto(cut, notesExpandLines);
     syncFormatButtonsUI();
+    resetNotesHistory(cut.notesHtml || '');
 
     notesExpandPanel.style.transition = 'none';
     notesExpandPanel.style.left = sourceRect.left + 'px';
@@ -2804,6 +3135,9 @@
     notesExpandPanel.classList.remove('show');
     notesExpandBackdrop.classList.remove('show');
     expandedCutId = null;
+    clearTimeout(notesHistoryTypingTimer);
+    notesHistory = [];
+    notesHistoryIndex = -1;
     setTimeout(() => {
       if(smallWrap && cut) buildLinesInto(cut, smallWrap);
     }, 340);
@@ -2837,7 +3171,11 @@
   function syncExpandedNotesAfterFormat(){
     if(!expandedCutId) return;
     const cut = state.cuts[expandedCutId];
-    if(cut) syncNotesFromLines(cut, notesExpandLines);
+    if(cut){
+      syncNotesFromLines(cut, notesExpandLines);
+      clearTimeout(notesHistoryTypingTimer);
+      pushNotesHistoryCheckpoint(cut.notesHtml);
+    }
   }
   document.querySelectorAll('.notes-color-swatch, .notes-style-btn').forEach(btn => {
     btn.addEventListener('pointerdown', e => e.preventDefault());
@@ -2859,7 +3197,7 @@
   notesExpandLines.addEventListener('keyup', syncFormatButtonsUI);
   notesExpandLines.addEventListener('pointerup', () => setTimeout(syncFormatButtonsUI, 0));
 
-  /* ===================== Menu (delete chip) ===================== */
+  /* ===================== Menu (handle tap: Duplicate / Trash) ===================== */
   function toggleUnitMenu(id){
     const wasOpen = openMenuUnitId === id;
     closeAllMenus();
@@ -3110,6 +3448,40 @@
     requestAnimationFrame(() => jumpToCut(id));
   }
 
+  /* Deliberately does NOT call renumberAllScenesSequentially() — unlike delete/move-to-scene,
+     duplicating never empties a scene or changes which scenes exist (the copy lands in the same
+     scene as its source), so there's no scene-number gap it could ever create. Per-scene shot
+     LETTERS (the "1A"/"1B" part) aren't stored on the cut at all — they're recomputed from
+     position within the scene at render time, so the new shot correctly pushes later letters in
+     its scene forward with no extra step here, same as insertCut above needs none either. */
+  function duplicateCut(id){
+    if(!editMode || appMode === 'trash') return;
+    closeAllMenus();
+    const src = state.cuts[id];
+    if(!src || !state.order.includes(id)) return;
+    pushUndoSnapshot();
+    const newId = uid('c');
+    const dup = { ...src, id: newId };
+    /* Arrays inside a cut are always reassigned wholesale elsewhere, never mutated in place —
+       the same invariant shallowCloneCuts (below) relies on for the global undo snapshot — so a
+       shallow copy of the array itself is enough for the duplicate to get its own independent
+       array without needing to also clone every element inside it. */
+    if(Array.isArray(src.editorStrokes)) dup.editorStrokes = [...src.editorStrokes];
+    if(Array.isArray(src.editorActions)) dup.editorActions = [...src.editorActions];
+    if(Array.isArray(src.editorRedoActions)) dup.editorRedoActions = [...src.editorRedoActions];
+    state.cuts[newId] = dup;
+    const oldRects = captureCutUnitRects();
+    const idx = state.order.indexOf(id);
+    state.order.splice(idx + 1, 0, newId);
+    saveOrder();
+    saveCut(newId);
+    renderFilmstrip();
+    renderScenesList();
+    playInsertShiftAnimation(oldRects, newId);
+    requestAnimationFrame(() => jumpToCut(newId));
+    showToast('Shot duplicated');
+  }
+
   function deleteCut(id){
     if(!editMode) return;
     closeAllMenus();
@@ -3127,7 +3499,14 @@
     showToast('Moved to Trash');
   }
 
-  function jumpToCut(id){
+  /* opts.instant: search-result taps use this to jump without the smooth-scroll travel time —
+     scrollIntoView({behavior:'instant'}) resolves synchronously, so the flash can fire right
+     after it instead of via requestAnimationFrame (which is timed for the smooth case below,
+     where the animation is still in flight and flashing immediately would fire mid-travel).
+     Default (no opts) is unchanged: this remains the one documented exception to "scroll only
+     via instant" — nav buttons, add-scene, etc. all still get the smooth travel + delayed flash. */
+  function jumpToCut(id, opts){
+    const instant = !!(opts && opts.instant);
     const unit = filmstripEl.querySelector('.cut-unit[data-unit-id="' + id + '"], .tile[data-unit-id="' + id + '"]');
     if(unit){
       const portrait = isPortrait();
@@ -3148,8 +3527,9 @@
       jumpScrollSuppressed = true;
       clearTimeout(jumpScrollSuppressTimer);
       markViewedCut(id);
-      unit.scrollIntoView({ behavior: 'smooth', inline: portrait ? 'nearest' : 'center', block: portrait ? 'center' : 'nearest' });
-      requestAnimationFrame(() => flashUnit(id));
+      unit.scrollIntoView({ behavior: instant ? 'instant' : 'smooth', inline: portrait ? 'nearest' : 'center', block: portrait ? 'center' : 'nearest' });
+      if(instant) flashUnit(id);
+      else requestAnimationFrame(() => flashUnit(id));
     }
   }
 
@@ -4510,6 +4890,212 @@
     }catch(err){
       showToast("Couldn't read that backup file");
     }
+  });
+
+  /* ===================== PDF export ===================== */
+  /* Independent of the app's own current viewMode ('basic'/'tile') — Export PDF is always
+     reachable from the sidebar regardless of which view is on screen, but the export itself only
+     ever offers two layouts (Vertical / Horizontal); there is no "tile" PDF layout. Scope is
+     always the CURRENT project's active shots (state.order), grouped by scene via the same
+     computeSceneGroups()/cutIdsForScene() the sidebar Scenes list already uses, so ordering and
+     scene-text parsing stay consistent with the rest of the app. No library dependency: the
+     "PDF" is a real print-formatted HTML document, generated fresh for both the in-app preview
+     (an iframe, so it renders pixel-for-pixel identical to what actually prints) and the final
+     export (the exact same document opened in a new tab, then window.print() — the person saves
+     it as a PDF from Safari's own print sheet). */
+  const HORIZONTAL_MAX_NOTE_LINES = 3;
+
+  /* Plain-text note lines for export, trimmed of trailing blanks — deliberately NOT
+     getRichLinesForCut/getNotesPlainText (Session 1's helper), which either pad to MIN_LINES
+     (wrong for print, which should only show real content) or flatten multi-line HTML into one
+     unbroken string (loses the line breaks export needs to lay out and to measure overflow
+     against). Formatting (bold/italic/etc.) is intentionally dropped here — plain text keeps the
+     print HTML generator simple, and nothing in the spec asked for styled text on the page. */
+  function getExportNoteLines(cut){
+    let rawLines;
+    if(typeof cut.notesHtml === 'string' && cut.notesHtml){
+      const tmp = document.createElement('div');
+      tmp.innerHTML = sanitizeRichHtml(cut.notesHtml);
+      rawLines = (tmp.children.length > 0 && Array.from(tmp.children).every(c => c.tagName === 'DIV'))
+        ? Array.from(tmp.children).map(c => c.innerHTML)
+        : [tmp.innerHTML];
+    } else {
+      rawLines = (cut.notes || '').split('\n').map(l => escapeHtml(l));
+    }
+    const lines = rawLines.map(h => stripTagsToText(h));
+    while(lines.length && lines[lines.length - 1].trim() === '') lines.pop();
+    return lines;
+  }
+  function getExportSceneGroups(){
+    const labels = computeMainShotLabels();
+    return computeSceneGroups().map(g => ({
+      sceneText: g.scene,
+      shots: cutIdsForScene(g.scene).map(id => {
+        const cut = state.cuts[id];
+        return {
+          id, label: labels[id] || '',
+          sceneNumber: parseSceneNumber(cut.scene || g.scene),
+          image: cut.image || null,
+          noteLines: getExportNoteLines(cut)
+        };
+      })
+    }));
+  }
+
+  const PDF_BASE_CSS =
+    '*{box-sizing:border-box;} body{font-family:Helvetica,Arial,sans-serif;margin:0;padding:0;color:#161616;background:#fff;}' +
+    '.note-line{ white-space:pre-wrap; word-break:break-word; }';
+
+  function buildVerticalExportHtml(groups){
+    const parts = [];
+    groups.forEach(g => {
+      parts.push('<div class="scene-header">' + escapeHtml(g.sceneText) + '</div>');
+      g.shots.forEach(s => {
+        parts.push(
+          '<div class="shot-row">' +
+            '<div class="frame-col">' +
+              '<div class="frame-box">' +
+                '<div class="frame-label">' + escapeHtml(s.label) + '</div>' +
+                (s.image ? '<img src="' + s.image + '">' : '') +
+              '</div>' +
+            '</div>' +
+            '<div class="notes-col">' +
+              (s.noteLines.length ? s.noteLines.map(l => '<div class="note-line">' + escapeHtml(l) + '</div>').join('') : '<div class="note-line note-line-empty">&nbsp;</div>') +
+            '</div>' +
+          '</div>'
+        );
+      });
+    });
+    const css =
+      '@page{ size:A4 portrait; margin:14mm; }' +
+      '.scene-header{ font-weight:800; font-size:13px; letter-spacing:.06em; text-transform:uppercase; margin:16px 0 8px; padding-bottom:4px; border-bottom:2px solid #111; page-break-after:avoid; }' +
+      '.scene-header:first-child{ margin-top:0; }' +
+      '.shot-row{ display:flex; align-items:flex-start; gap:14px; border:3px solid #111; padding:8px; margin-bottom:7px; page-break-inside:avoid; }' +
+      /* Frame enlarged 50% in both dimensions per Kevin's request: 220x119 -> 330x179. Scene/shot
+         labels moved from separate rows outside the frame to small overlay badges on the frame
+         itself (top-left/top-right), which is why frame-box needs position:relative now. */
+      '.frame-col{ flex:0 0 auto; width:330px; text-align:left; }' +
+      '.frame-box{ position:relative; width:330px; height:179px; border:1px solid #111; overflow:hidden; background:#eee; display:flex; align-items:center; justify-content:center; }' +
+      '.frame-box img{ width:100%; height:100%; object-fit:contain; }' +
+      '.frame-label{ position:absolute; top:4px; left:4px; z-index:2; background:rgba(0,0,0,.6); color:#fff; font-size:9.6px; font-weight:800; letter-spacing:.03em; padding:2px 5px; border-radius:3px; }' +
+      '.notes-col{ flex:1 1 auto; min-width:0; border-left:1px solid #ccc; padding-left:12px; padding-top:2px; }' +
+      '.note-line{ font-size:11px; line-height:1.6; border-bottom:1px solid #ddd; padding:1px 0; min-height:16px; }' +
+      '@media screen{ body{ background:#6b6b6e; padding:20px 0; } .doc-inner{ width:794px; margin:0 auto; background:#fff; padding:14mm; box-shadow:0 6px 20px rgba(0,0,0,.35); zoom:.58; } }' +
+      '@media print{ .doc-inner{ width:auto; margin:0; padding:0; box-shadow:none; background:none; } }';
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Storyboard</title><style>' + PDF_BASE_CSS + css + '</style></head>' +
+      '<body><div class="doc-inner">' + parts.join('') + '</div></body></html>';
+  }
+
+  function buildHorizontalExportHtml(groups){
+    const PANELS_PER_PAGE = 6;
+    const pages = [];
+    let current = [];
+    let currentSceneText = '';
+    function flush(){ if(current.length){ pages.push({ sceneText: currentSceneText, panels: current }); current = []; } }
+    groups.forEach(g => {
+      flush(); /* new page per scene, same as before */
+      currentSceneText = g.sceneText;
+      g.shots.forEach(s => {
+        /* Horizontal is the image-focused layout — notes are always a brief silent-truncated
+           snippet here; Vertical is the layout for complete notes instead. Padded to exactly
+           HORIZONTAL_MAX_NOTE_LINES slots (blank ones still ruled) so every panel's notes area
+           reads as consistent ruled paper regardless of how much a shot's note actually has,
+           matching the reference template's look. */
+        const lines = s.noteLines.slice(0, HORIZONTAL_MAX_NOTE_LINES);
+        while(lines.length < HORIZONTAL_MAX_NOTE_LINES) lines.push('');
+        current.push({ label: s.label, image: s.image, noteLines: lines });
+        if(current.length === PANELS_PER_PAGE) flush();
+      });
+    });
+    flush();
+
+    const pagesHtml = pages.map(pg => {
+      const panelsHtml = pg.panels.map(p =>
+        '<div class="panel">' +
+          '<div class="panel-frame">' +
+            '<div class="frame-label">' + escapeHtml(p.label) + '</div>' +
+            (p.image ? '<img src="' + p.image + '">' : '') +
+          '</div>' +
+          '<div class="panel-notes">' + p.noteLines.map(l => '<div class="note-line">' + escapeHtml(l) + '</div>').join('') + '</div>' +
+        '</div>'
+      ).join('');
+      return '<div class="page"><div class="page-header">' + escapeHtml(pg.sceneText) + '</div><div class="panel-grid">' + panelsHtml + '</div></div>';
+    }).join('');
+
+    const css =
+      '@page{ size:A4 landscape; margin:0; }' +
+      '.page{ width:297mm; height:210mm; padding:10mm; page-break-after:always; }' +
+      '.page:last-child{ page-break-after:auto; }' +
+      '.page-header{ font-weight:800; font-size:13px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:6mm; padding-bottom:2mm; border-bottom:1.5px solid #111; }' +
+      '.panel-grid{ display:grid; grid-template-columns:repeat(3,1fr); grid-auto-rows:auto; gap:8mm; width:100%; justify-content:start; align-content:start; }' +
+      /* Near-square rectangle (slightly wider than tall), not a perfect square — matches the
+         reference template Kevin shared, which measures roughly 9:8 per panel. */
+      '.panel{ aspect-ratio:9/8; border:2px solid #111; display:flex; flex-direction:column; overflow:hidden; }' +
+      /* Divider line between image and notes areas, ~73/27 split — matches the reference. */
+      '.panel-frame{ position:relative; flex:73 1 0; min-height:0; background:#eee; display:flex; align-items:center; justify-content:center; }' +
+      '.panel-frame img{ width:100%; height:100%; object-fit:contain; }' +
+      '.frame-label{ position:absolute; top:3px; left:3px; z-index:2; background:rgba(0,0,0,.6); color:#fff; font-size:9.6px; font-weight:800; letter-spacing:.03em; padding:2px 5px; border-radius:3px; }' +
+      '.panel-notes{ flex:27 1 0; min-height:0; padding:2px 7px; border-top:1.5px solid #111; display:flex; flex-direction:column; justify-content:center; gap:2px; }' +
+      '.panel-notes .note-line{ font-size:10.5px; line-height:1.35; border-bottom:1px solid #ccc; padding:1px 0; min-height:13px; }' +
+      '@media screen{ body{ background:#6b6b6e; padding:20px 0; } .page{ margin:0 auto 20px; background:#fff; box-shadow:0 6px 20px rgba(0,0,0,.35); zoom:.42; } }' +
+      '@media print{ .page{ margin:0; box-shadow:none; } }';
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Storyboard</title><style>' + PDF_BASE_CSS + css + '</style></head>' +
+      '<body>' + pagesHtml + '</body></html>';
+  }
+
+  /* ---- Overlay state + wiring ---- */
+  const pdfExportBackdrop = document.getElementById('pdfExportBackdrop');
+  const pdfExportPanel = document.getElementById('pdfExportPanel');
+  const pdfPreviewFrame = document.getElementById('pdfPreviewFrame');
+  const pdfExportGoBtn = document.getElementById('pdfExportGoBtn');
+  let pdfExportLayout = 'vertical';
+
+  function renderPdfPreview(){
+    const groups = getExportSceneGroups();
+    pdfPreviewFrame.srcdoc = pdfExportLayout === 'vertical'
+      ? buildVerticalExportHtml(groups)
+      : buildHorizontalExportHtml(groups);
+  }
+
+  function openPdfExport(){
+    pdfExportLayout = 'vertical';
+    document.querySelectorAll('.pdf-layout-btn').forEach(b => b.classList.toggle('active', b.dataset.layout === 'vertical'));
+    pdfExportBackdrop.classList.add('show');
+    pdfExportPanel.classList.add('show');
+    renderPdfPreview();
+  }
+  function closePdfExport(){
+    pdfExportBackdrop.classList.remove('show');
+    pdfExportPanel.classList.remove('show');
+  }
+  document.getElementById('exportPdfBtn').addEventListener('click', () => { closeSidebar(); openPdfExport(); });
+  document.getElementById('pdfExportCloseBtn').addEventListener('click', closePdfExport);
+  pdfExportBackdrop.addEventListener('click', closePdfExport);
+  document.querySelectorAll('.pdf-layout-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if(btn.dataset.layout === pdfExportLayout) return;
+      pdfExportLayout = btn.dataset.layout;
+      document.querySelectorAll('.pdf-layout-btn').forEach(b => b.classList.toggle('active', b === btn));
+      /* Horizontal is the image-focused layout — notes always get silently truncated to
+         HORIZONTAL_MAX_NOTE_LINES with no per-shot choice, so a single brief heads-up here
+         (not a blocking confirm) is enough warning every time it's selected. */
+      if(pdfExportLayout === 'horizontal') showToast('Notes may be cut off in this layout', 1000);
+      renderPdfPreview();
+    });
+  });
+  pdfExportGoBtn.addEventListener('click', () => {
+    const groups = getExportSceneGroups();
+    const html = pdfExportLayout === 'vertical'
+      ? buildVerticalExportHtml(groups)
+      : buildHorizontalExportHtml(groups);
+    const win = window.open('', '_blank');
+    if(!win){ showToast('Could not open the print window — check your pop-up blocker'); return; }
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    /* A freshly-written document needs a beat for images (data-URIs, so no network wait needed,
+       but still async decode) and layout to settle before print() captures accurate page content. */
+    setTimeout(() => { try{ win.print(); }catch(e){} }, 400);
   });
 
   /* ===================== Shared canvas drawing helpers ===================== */
