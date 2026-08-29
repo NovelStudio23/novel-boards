@@ -52,7 +52,7 @@
      which it needs to override. Removed the instant the hold is ruled out (moved/lifted) or
      succeeds, so a genuine text-selection drag right after is completely unaffected. */
   .notes.longpress-armed .note-line{ -webkit-user-select:none; user-select:none; }
-  html,body{ margin:0; height:100%; overflow:hidden; overscroll-behavior:none; background:var(--bg); }
+  html,body{ margin:0; height:100%; height:-webkit-fill-available; overflow:hidden; overscroll-behavior:none; background:var(--bg); }
   body{ font-family:var(--font-body); color:var(--text); }
   button, input, textarea{ font-family:inherit; color:inherit; }
   button{ appearance:none; -webkit-appearance:none; background:none; border:none; padding:0; cursor:pointer; transition:transform .12s ease, opacity .12s ease, background .15s ease, border-color .15s ease; }
@@ -67,7 +67,7 @@
     *{ animation-duration:.001ms !important; transition-duration:.001ms !important; }
   }
 
-  #app{ height:100vh; height:100dvh; height:var(--app-height, 100dvh); display:flex; flex-direction:column; }
+  #app{ height:100vh; height:100dvh; height:-webkit-fill-available; display:flex; flex-direction:column; }
 
   /* ---------- Top bar ---------- */
   .topbar{
@@ -244,7 +244,6 @@
   .scene-select-circle:active{ transform:translateY(-50%) scale(.95); }
   .sidebar-empty{ padding:2px 12px 10px; color:var(--text-faint); font-size:12.5px; line-height:1.6; }
   .sidebar-footer{ padding:12px 18px calc(16px + env(safe-area-inset-bottom)); font-size:11px; color:var(--text-faint); line-height:1.55; border-top:1px solid var(--line); flex:0 0 auto; }
-  .sidebar-hint{ margin:0 0 10px; }
   .backup-row{ display:flex; gap:8px; }
   .backup-row + .backup-row{ margin-top:8px; }
   .backup-btn{ flex:1 1 0; display:flex; align-items:center; justify-content:center; gap:5px; padding:8px 6px; border-radius:10px; border:1px solid var(--line-strong); color:var(--text-dim); font-size:11px; font-weight:700; }
@@ -563,7 +562,7 @@
      element scrolling as part of ordinary page content has nothing to get out of sync with,
      which is the actual "moves as one rigid page, like real paper" behavior that was wanted. */
   .notes-lines.expanded{
-    overflow-y:auto; -webkit-overflow-scrolling:touch;
+    overflow-y:auto; -webkit-overflow-scrolling:touch; outline:none;
   }
   .notes-lines.expanded .note-line{ height:45px; line-height:45px; font-size:23.25px; padding:0 22px; }
   .notes-lines.expanded .notes-lines-filler{
@@ -603,7 +602,6 @@
     flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:12px;
     padding:9px 16px; border-bottom:3px solid var(--ink); background:var(--paper);
   }
-  .notes-format-left{ display:flex; align-items:center; gap:12px; min-width:0; }
   .notes-format-colors{ display:flex; align-items:center; gap:7px; }
   .notes-color-swatch{ width:22px; height:22px; border-radius:50%; border:2px solid transparent; padding:0; flex:0 0 auto; }
   .notes-color-swatch.active{ border-color:var(--ink-dim); }
@@ -766,14 +764,22 @@
   .eraser-icon-btn.active{ background:transparent; color:var(--text-dim); }
   .color-swatch{ width:26px; height:26px; border-radius:50%; flex:0 0 auto; background:var(--sw); border:2px solid rgba(255,255,255,.22); touch-action:none; -webkit-touch-callout:none; }
   .color-swatch.active{ box-shadow:0 0 0 3px var(--bg-deep), 0 0 0 5px var(--sw); }
-  .size-dot{ width:30px; height:30px; border-radius:9px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; border:1px solid transparent; touch-action:none; -webkit-touch-callout:none; }
-  .size-dot i{ display:block; border-radius:50%; background:var(--text); font-style:normal; }
-  .size-dot[data-size="4"] i{ width:5px; height:5px; }
-  .size-dot[data-size="8"] i{ width:9px; height:9px; }
-  .size-dot[data-size="14"] i{ width:14px; height:14px; }
-  .size-dot[data-size="22"] i{ width:19px; height:19px; }
-  .size-dot[data-size="32"] i{ width:24px; height:24px; }
-  .size-dot.active{ background:var(--bg-elevated-2); border-color:var(--line-strong); }
+  .size-slider{
+    position:relative; width:118px; height:32px; flex:0 0 auto; border-radius:16px;
+    background:var(--bg-elevated-2); touch-action:none; -webkit-touch-callout:none;
+  }
+  .size-slider-track{
+    position:absolute; left:14px; right:14px; top:50%; height:14px; transform:translateY(-50%);
+    background:var(--line-strong); pointer-events:none;
+    clip-path:polygon(0 44%, 100% 14%, 100% 86%, 0 56%);
+  }
+  .size-slider-thumb{
+    position:absolute; top:50%; left:14px; width:26px; height:26px; margin-left:-13px; margin-top:-13px;
+    border-radius:50%; background:var(--bg-elevated); border:1px solid var(--line-strong);
+    display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,.25);
+    pointer-events:none;
+  }
+  .size-slider-thumb i{ display:block; border-radius:50%; background:var(--text); font-style:normal; }
   .icon-btn.labeled{ width:auto; padding:0 13px; gap:6px; font-size:12.5px; font-weight:700; border:1px solid var(--line-strong); border-radius:19px; touch-action:none; -webkit-touch-callout:none; }
   .icon-btn.labeled svg{ width:16px; height:16px; }
 
@@ -824,6 +830,11 @@
     box-shadow:0 16px 40px rgba(0,0,0,.45); transform:scale(.95); transform-origin:top left;
   }
   .scene-action-sheet.show{ opacity:1; pointer-events:auto; transform:scale(1); }
+  /* Export menu reuses .scene-action-sheet's look, but isn't anchored to a pressed row like the
+     scene one is (JS-positioned) — it's opened from a single fixed sidebar-footer button, so it
+     just centers in the viewport instead. */
+  #exportMenuSheet{ left:50%; top:50%; transform:translate(-50%,-50%) scale(.95); transform-origin:center; }
+  #exportMenuSheet.show{ transform:translate(-50%,-50%) scale(1); }
   .scene-action-sheet-title{ padding:12px 12px 10px; font-family:var(--font-mono); font-size:12px; font-weight:700; color:var(--text-dim); letter-spacing:.04em; text-align:center; }
   .scene-action-sheet-btn{
     display:block; width:100%; padding:13px 14px; border-radius:11px; font-size:14.5px; font-weight:600;
@@ -981,7 +992,6 @@
         </div>
       </div>
       <div class="sidebar-footer">
-        <p class="sidebar-hint">Enter a scene number in each shot's SCENE field and it will appear here.</p>
         <div class="backup-row">
           <button id="clearBlankShotsBtn" class="backup-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6.5 6.5l2 2M15.5 15.5l2 2M6.5 17.5l2-2M15.5 8.5l2-2"/></svg>
@@ -991,17 +1001,11 @@
         <div class="backup-row">
           <button id="exportBtn" class="backup-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0-4-4m4 4 4-4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-            <span>Export Backup</span>
+            <span>Export</span>
           </button>
           <button id="importBtn" class="backup-btn">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3m0 0 4 4m-4-4-4 4M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>
-            <span>Import Backup</span>
-          </button>
-        </div>
-        <div class="backup-row">
-          <button id="exportPdfBtn" class="backup-btn">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l5 5v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Z"/><path d="M15 2v5h5"/></svg>
-            <span>Export PDF</span>
+            <span>Import</span>
           </button>
         </div>
         <input type="file" id="importInput" accept="application/json,.json" hidden>
@@ -1041,23 +1045,20 @@
     <button id="notesExpandDone" class="notes-expand-done">Done</button>
   </div>
   <div class="notes-format-toolbar" id="notesFormatToolbar">
-    <div class="notes-format-left">
-      <div class="notes-format-colors" id="notesColorSwatches">
-        <button class="notes-color-swatch active" data-color="#221F1C" style="background:#221F1C"></button>
-        <button class="notes-color-swatch" data-color="#E0502A" style="background:#E0502A"></button>
-        <button class="notes-color-swatch" data-color="#2E6BE0" style="background:#2E6BE0"></button>
-        <button class="notes-color-swatch" data-color="#2E9E4F" style="background:#2E9E4F"></button>
-        <button class="notes-color-swatch" data-color="#9B4FE0" style="background:#9B4FE0"></button>
-        <button class="notes-color-swatch" data-color="#9A9A9E" style="background:#9A9A9E"></button>
-      </div>
-      <div class="notes-format-styles">
-        <button class="notes-style-btn" data-style="bold" title="Bold"><b>B</b></button>
-        <button class="notes-style-btn" data-style="italic" title="Italic"><i>I</i></button>
-        <button class="notes-style-btn" data-style="underline" title="Underline"><u>U</u></button>
-        <button class="notes-style-btn" data-style="strikethrough" title="Strikethrough"><s>S</s></button>
-      </div>
+    <div class="notes-format-colors" id="notesColorSwatches">
+      <button class="notes-color-swatch active" data-color="#221F1C" style="background:#221F1C"></button>
+      <button class="notes-color-swatch" data-color="#E0502A" style="background:#E0502A"></button>
+      <button class="notes-color-swatch" data-color="#2E6BE0" style="background:#2E6BE0"></button>
+      <button class="notes-color-swatch" data-color="#2E9E4F" style="background:#2E9E4F"></button>
+      <button class="notes-color-swatch" data-color="#9B4FE0" style="background:#9B4FE0"></button>
+      <button class="notes-color-swatch" data-color="#9A9A9E" style="background:#9A9A9E"></button>
     </div>
-    <button id="notesDeleteAllBtn" class="notes-delete-all-btn">Delete All</button>
+    <div class="notes-format-styles">
+      <button class="notes-style-btn" data-style="bold" title="Bold"><b>B</b></button>
+      <button class="notes-style-btn" data-style="italic" title="Italic"><i>I</i></button>
+      <button class="notes-style-btn" data-style="underline" title="Underline"><u>U</u></button>
+      <button class="notes-style-btn" data-style="strikethrough" title="Strikethrough"><s>S</s></button>
+    </div>
   </div>
   <div class="notes-expand-body">
     <div class="notes-lines expanded" id="notesExpandLines"></div>
@@ -1162,11 +1163,10 @@
     <button class="color-swatch" data-color="#3E6FD9" style="--sw:#3E6FD9" aria-label="Blue"></button>
     <button class="color-swatch" data-color="#8B8D96" style="--sw:#8B8D96" aria-label="Gray"></button>
     <div class="tool-divider"></div>
-    <button class="size-dot" data-size="4" aria-label="Thin"><i></i></button>
-    <button class="size-dot active" data-size="8" aria-label="Medium"><i></i></button>
-    <button class="size-dot" data-size="14" aria-label="Thick"><i></i></button>
-    <button class="size-dot" data-size="22" aria-label="Extra thick"><i></i></button>
-    <button class="size-dot" data-size="32" aria-label="Widest"><i></i></button>
+    <div class="size-slider" id="sizeSlider" aria-label="Stroke size">
+      <div class="size-slider-track"></div>
+      <div class="size-slider-thumb" id="sizeSliderThumb"><i id="sizeSliderDot"></i></div>
+    </div>
     <div class="tool-divider"></div>
     <button id="undoBtn" class="icon-btn" aria-label="Undo">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10h9a5 5 0 0 1 0 10h-2M3 10l5-5M3 10l5 5"/></svg>
@@ -1238,6 +1238,13 @@
     <button id="promptOkBtn" class="confirm-btn confirm-ok-primary">Rename</button>
   </div>
 </div>
+<div class="scene-action-backdrop" id="exportMenuBackdrop"></div>
+<div class="scene-action-sheet" id="exportMenuSheet">
+  <div class="scene-action-sheet-title">EXPORT</div>
+  <button class="scene-action-sheet-btn" id="exportMenuBackupBtn">Backup (.json)</button>
+  <button class="scene-action-sheet-btn" id="exportMenuPdfBtn">Export as PDF…</button>
+  <button class="scene-action-sheet-btn cancel" id="exportMenuCancelBtn">Cancel</button>
+</div>
 <div class="scene-action-backdrop" id="sceneActionBackdrop"></div>
 <div class="scene-action-sheet" id="sceneActionSheet">
   <div class="scene-action-sheet-title" id="sceneActionSheetTitle">SCENE</div>
@@ -1251,23 +1258,6 @@
 <script>
 (function(){
   'use strict';
-
-  /* ===================== App height fix (iOS standalone gray bottom bar) ===================== */
-  /* #app's CSS height falls back through 100vh -> 100dvh -> var(--app-height). 100dvh alone is
-     usually enough in a normal Safari tab (it tracks the address bar collapsing/expanding), but
-     in standalone home-screen mode some iOS versions still compute it a few pixels short of the
-     true visual viewport, leaving a thin gray sliver at the bottom (visible only in standalone —
-     matches what Kevin's seeing, since a regular Safari tab never showed it). Setting an explicit
-     pixel height from window.innerHeight via JS is the standard, more reliable fix for this exact
-     class of bug — it doesn't replace the dvh fallback (still there for the instant before this
-     runs, and for any environment where JS is somehow delayed), just overrides it once available.
-     Re-run on resize/orientationchange since the safe-area allocation can shift between the two. */
-  function updateAppHeight(){
-    document.documentElement.style.setProperty('--app-height', window.innerHeight + 'px');
-  }
-  updateAppHeight();
-  window.addEventListener('resize', updateAppHeight, { passive: true });
-  window.addEventListener('orientationchange', () => setTimeout(updateAppHeight, 50));
 
   /* ===================== Icons (dynamic) ===================== */
   const ICONS = {
@@ -2030,7 +2020,11 @@
     markViewedCut(anchorId);
     updateSelectButtonVisibility();
     document.querySelectorAll('.scene-input-top').forEach(el => { el.readOnly = appMode === 'trash' || !editMode; });
-    document.querySelectorAll('.note-line').forEach(el => { el.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true'; });
+    document.querySelectorAll('.note-line').forEach(el => {
+      if(notesExpandLines.contains(el)) return;
+      el.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true';
+    });
+    notesExpandLines.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true';
   }
   editToggleBtn.addEventListener('click', () => setEditMode(!editMode));
 
@@ -2802,15 +2796,56 @@
     return wrap;
   }
 
+  /* buildLineDiv is shared by the compact card view (each wrap is its own fresh element, one per
+     card) and the notes-expand overlay (always the single notesExpandLines element). The card
+     view keeps each .note-line individually contentEditable — the stable, established approach.
+     The expand overlay is deliberately different: individually-contentEditable siblings are each
+     their own separate editing host, which is exactly why selection previously couldn't span
+     across lines there (pressing Enter split text into two separately-selectable regions). For
+     the expand overlay, only notesExpandLines itself carries contentEditable — the line divs
+     inherit editability from it, so native selection/Select-All/delete now spans every line, the
+     way a normal Notes app works. Everything else (auto-wrap, growing blank lines, undo/redo)
+     is untouched — only *which element is the editing host* changed. */
   function buildLineDiv(cut, wrap, index, html){
     const div = document.createElement('div');
     div.className = 'note-line';
-    div.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true';
+    const isExpand = (wrap === notesExpandLines);
+    if(!isExpand){
+      div.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true';
+    }
     div.innerHTML = html || '';
     if(index === 0 && !html) div.setAttribute('data-placeholder', 'Blocking, camera moves, notes…');
-    div.addEventListener('input', () => onLineInput(cut, wrap, div));
-    div.addEventListener('keydown', e => onLineKeydown(e, cut, wrap, div));
+    if(!isExpand){
+      div.addEventListener('input', () => onLineInput(cut, wrap, div));
+      div.addEventListener('keydown', e => onLineKeydown(e, cut, wrap, div));
+    }
     return div;
+  }
+
+  /* Resolves which .note-line the current caret/selection is inside, for the expand overlay's
+     container-level input/keydown listeners (see buildLineDiv's comment — individual lines there
+     aren't separately focusable, so events target notesExpandLines itself, not a specific line;
+     this walks up from the live selection to find which line that actually is). */
+  function currentLineFromSelection(wrap){
+    const sel = window.getSelection();
+    if(!sel || !sel.rangeCount) return null;
+    let node = sel.getRangeAt(0).startContainer;
+    if(node.nodeType === 3) node = node.parentElement;
+    while(node && node !== wrap){
+      if(node.classList && node.classList.contains('note-line')) return node;
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  /* Focuses a specific line and places the caret in it. For the card view each line is its own
+     editing host, so focusing the line directly works. For the expand overlay, only the wrap
+     itself is a real focusable editing host — focus that, then use Range/Selection (which can
+     target any node, focusable or not) to land the caret inside the specific line. */
+  function focusLineIn(wrap, div, atStart){
+    if(wrap === notesExpandLines) notesExpandLines.focus();
+    else div.focus();
+    if(atStart) placeCaretAtStart(div); else placeCaretAtEnd(div);
   }
 
   /* Single source of truth for a cut's notes: cut.notesHtml (rich, per-line divs) — cut.notes
@@ -2847,7 +2882,7 @@
      the user is looking at it) need to check the div is actually on-screen themselves first. ---- */
   function checkLineOverflow(cut, wrap, div, opts){
     const silent = !!(opts && opts.silent);
-    if(!silent && div.contentEditable !== 'true') return;
+    if(!silent && !div.isContentEditable) return;
     let current = div;
     let moved = false;
     let iterations = 0;
@@ -2887,8 +2922,7 @@
       moved = true;
     }
     if(moved && current && !silent){
-      current.focus();
-      placeCaretAtEnd(current);
+      focusLineIn(wrap, current, false);
     }
   }
 
@@ -2957,7 +2991,7 @@
     const idx = lines.indexOf(div);
     if(e.key === 'Enter'){
       e.preventDefault();
-      if(div.contentEditable !== 'true') return;
+      if(!div.isContentEditable) return;
       let afterFragment = document.createDocumentFragment();
       const sel = window.getSelection();
       if(sel.rangeCount > 0){
@@ -2974,12 +3008,11 @@
       if(div.nextSibling) wrap.insertBefore(newLine, div.nextSibling);
       else wrap.appendChild(newLine);
       syncNotesFromLines(cut, wrap);
-      newLine.focus();
-      placeCaretAtStart(newLine);
+      focusLineIn(wrap, newLine, true);
     } else if(e.key === 'ArrowDown'){
-      if(idx < lines.length - 1){ e.preventDefault(); lines[idx + 1].focus(); placeCaretAtStart(lines[idx + 1]); }
+      if(idx < lines.length - 1){ e.preventDefault(); focusLineIn(wrap, lines[idx + 1], true); }
     } else if(e.key === 'ArrowUp'){
-      if(idx > 0){ e.preventDefault(); lines[idx - 1].focus(); placeCaretAtStart(lines[idx - 1]); }
+      if(idx > 0){ e.preventDefault(); focusLineIn(wrap, lines[idx - 1], true); }
     }
   }
 
@@ -2991,8 +3024,8 @@
   let expandedCutId = null;
 
   /* ---- Local Undo/Redo for the expand overlay only ---- */
-  /* Scoped to a single open session of this overlay — a lightweight safety net (mainly so Delete
-     All is recoverable), not a persisted history; reset every time the overlay opens/closes.
+  /* Scoped to a single open session of this overlay — a lightweight safety net (so a select-all-
+     and-delete is recoverable), not a persisted history; reset every time the overlay opens/closes.
      Snapshot-based (whole notesHtml strings) rather than action-based: notes are just marked-up
      text with none of the nested stroke/photo state the fullscreen editor's undo has to track,
      so whole-string snapshots are simpler and safer here than trying to diff contenteditable DOM
@@ -3026,8 +3059,8 @@
      mirror + saves, by routing through the same buildLinesInto/syncNotesFromLines pair every
      other notes-writing path already uses — deliberately not hand-rolling a separate write path
      here. Clearing cut.notes alongside an empty html avoids getRichLinesForCut's empty-notesHtml
-     fallback (which reads cut.notes) from resurrecting stale plain text after a Delete All or an
-     undo back past one. */
+     fallback (which reads cut.notes) from resurrecting stale plain text after undoing back past
+     a select-all-and-delete. */
   function applyNotesHtmlAndRebuild(cut, html){
     cut.notesHtml = html || '';
     if(!cut.notesHtml) cut.notes = '';
@@ -3041,23 +3074,8 @@
     applyNotesHtmlAndRebuild(cut, notesHistory[notesHistoryIndex]);
     updateNotesHistoryButtons();
   }
-  function commitNotesChange(cut, newHtml){
-    applyNotesHtmlAndRebuild(cut, newHtml);
-    pushNotesHistoryCheckpoint(cut.notesHtml);
-  }
   notesUndoBtn.addEventListener('click', () => { if(notesHistoryIndex > 0) applyNotesHistoryIndex(notesHistoryIndex - 1); });
   notesRedoBtn.addEventListener('click', () => { if(notesHistoryIndex < notesHistory.length - 1) applyNotesHistoryIndex(notesHistoryIndex + 1); });
-  document.getElementById('notesDeleteAllBtn').addEventListener('click', async () => {
-    if(!expandedCutId) return;
-    if(!editMode || appMode === 'trash' || selectMode) return; /* mirrors onLineInput's own editability guard */
-    const cut = state.cuts[expandedCutId];
-    if(!cut) return;
-    const ok = await showConfirm('Delete all notes for this shot?', 'Delete All');
-    if(!ok) return;
-    clearTimeout(notesHistoryTypingTimer);
-    pushNotesHistoryCheckpoint(cut.notesHtml); /* flush pre-delete state as its own undo step, in case a typing debounce was still pending */
-    commitNotesChange(cut, '');
-  });
 
   /* cut.notesHtml can come from an imported backup file, not just this app's own editor —
      strip it down to a small safe allowlist before ever assigning it via innerHTML. */
@@ -3140,6 +3158,7 @@
 
     notesExpandLabel.textContent = shotLabelFor(cut.id) + ' — NOTES';
 
+    notesExpandLines.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true';
     buildLinesInto(cut, notesExpandLines);
     syncFormatButtonsUI();
     resetNotesHistory(cut.notesHtml || '');
@@ -3238,6 +3257,27 @@
   });
   notesExpandLines.addEventListener('keyup', syncFormatButtonsUI);
   notesExpandLines.addEventListener('pointerup', () => setTimeout(syncFormatButtonsUI, 0));
+
+  /* See buildLineDiv's block comment: notesExpandLines itself is the sole editing host for the
+     expand overlay, so input/keydown events land on the container, not on whichever .note-line
+     the caret happens to be in. Resolve the actual line from the live selection and hand off to
+     the exact same onLineInput/onLineKeydown the card view calls per-line — every downstream
+     behavior (auto-wrap, growing blank lines, undo/redo checkpoints) is identical either way. */
+  notesExpandLines.addEventListener('input', () => {
+    if(!editMode || appMode === 'trash' || !expandedCutId) return;
+    const cut = state.cuts[expandedCutId];
+    if(!cut) return;
+    const lines = notesExpandLines.querySelectorAll('.note-line');
+    const div = currentLineFromSelection(notesExpandLines) || lines[lines.length - 1];
+    if(div) onLineInput(cut, notesExpandLines, div);
+  });
+  notesExpandLines.addEventListener('keydown', e => {
+    if(!editMode || appMode === 'trash' || !expandedCutId) return;
+    const cut = state.cuts[expandedCutId];
+    if(!cut) return;
+    const div = currentLineFromSelection(notesExpandLines);
+    if(div) onLineKeydown(e, cut, notesExpandLines, div);
+  });
 
   /* ===================== Menu (handle tap: Duplicate / Trash) ===================== */
   function toggleUnitMenu(id){
@@ -4851,7 +4891,29 @@
   }
 
   document.getElementById('clearBlankShotsBtn').addEventListener('click', () => { closeSidebar(); clearBlankShots(); });
-  document.getElementById('exportBtn').addEventListener('click', async () => {
+
+  /* ---- Export menu (Backup / PDF) ---- */
+  /* Reuses the scene-action-sheet's exact visual style (small popup, title + stacked buttons +
+     cancel) via the same CSS classes, just as a separate element/id so it's not entangled with
+     the scene long-press menu's own open/close state. */
+  function openExportMenu(){
+    document.getElementById('exportMenuBackdrop').classList.add('show');
+    document.getElementById('exportMenuSheet').classList.add('show');
+  }
+  function closeExportMenu(){
+    document.getElementById('exportMenuBackdrop').classList.remove('show');
+    document.getElementById('exportMenuSheet').classList.remove('show');
+  }
+  document.getElementById('exportBtn').addEventListener('click', openExportMenu);
+  document.getElementById('exportMenuCancelBtn').addEventListener('click', closeExportMenu);
+  document.getElementById('exportMenuBackdrop').addEventListener('click', closeExportMenu);
+  document.getElementById('exportMenuPdfBtn').addEventListener('click', () => {
+    closeExportMenu();
+    closeSidebar();
+    openPdfExport();
+  });
+  document.getElementById('exportMenuBackupBtn').addEventListener('click', async () => {
+    closeExportMenu();
     try{
       const bundle = await gatherFullBackup();
       const stamp = new Date().toISOString().slice(0, 10);
@@ -5167,7 +5229,6 @@
     pdfExportBackdrop.classList.remove('show');
     pdfExportPanel.classList.remove('show');
   }
-  document.getElementById('exportPdfBtn').addEventListener('click', () => { closeSidebar(); openPdfExport(); });
   document.getElementById('pdfExportCloseBtn').addEventListener('click', closePdfExport);
   pdfExportBackdrop.addEventListener('click', closePdfExport);
   document.querySelectorAll('.pdf-layout-btn').forEach(btn => {
@@ -5489,7 +5550,7 @@
   flattenCanvas.height = CANVAS_H;
   const flattenCtx = flattenCanvas.getContext('2d');
 
-  const editorState = { cutId: null, baseImage: null, photoDataURL: null, strokes: [], actions: [], redoActions: [], tool: 'pen', color: '#221F1C', size: 8, photoTransform: { scale: 1, offsetX: 0, offsetY: 0 } };
+  const editorState = { cutId: null, baseImage: null, photoDataURL: null, strokes: [], actions: [], redoActions: [], tool: 'pen', color: '#221F1C', size: 8, eraserSize: 52, photoTransform: { scale: 1, offsetX: 0, offsetY: 0 } };
   let editorEraserType = 'object'; /* 'object' | 'pixel' */
   /* Finger-drawing toggle: off by default (Apple Pencil only), like editorEraserType this is a
      session-level setting (not per-cut, not reset in openEditor) — it stays as the user left it
@@ -6229,7 +6290,7 @@
     return false;
   }
   function eraseObjectsAt(x, y){
-    const tolerance = editorState.size;
+    const tolerance = editorState.eraserSize;
     const remaining = [];
     let removedAny = false;
     editorState.strokes.forEach((s, idx) => {
@@ -6478,7 +6539,7 @@
       eraseSessionRemovals = [];
       eraseObjectsAt(p.x, p.y);
     } else {
-      currentStroke = { id: uid('s'), mode: editorState.tool, color: editorState.color, size: editorState.size, points: [p] };
+      currentStroke = { id: uid('s'), mode: editorState.tool, color: editorState.color, size: (editorState.tool === 'eraser' ? editorState.eraserSize : editorState.size), points: [p] };
       editorState.strokes.push(currentStroke);
       editorState.actions.push({ type: 'add', strokeId: currentStroke.id, strokeData: currentStroke });
       editorState.redoActions = [];
@@ -6647,7 +6708,7 @@
     if(editorState.tool !== 'select') clearSelection();
     document.querySelectorAll('.tool-btn').forEach(b => b.classList.toggle('active', b.dataset.tool === editorState.tool));
     document.querySelectorAll('.color-swatch').forEach(s => s.classList.toggle('active', s.dataset.color === editorState.color && editorState.tool === 'pen'));
-    document.querySelectorAll('.size-dot').forEach(d => d.classList.toggle('active', Number(d.dataset.size) === editorState.size));
+    updateSizeSliderUI();
     document.querySelectorAll('.eraser-type-btn').forEach(b => b.classList.toggle('active', editorState.tool === 'eraser' && b.dataset.eraserType === editorEraserType));
     eraserTypeToggle.classList.toggle('tool-active', editorState.tool === 'eraser');
     /* Pen tool selector + input-mode toggle combined into one box (mirrors the eraser box's
@@ -6678,9 +6739,73 @@
   document.querySelectorAll('.color-swatch').forEach(sw => {
     sw.addEventListener('click', () => { editorState.color = sw.dataset.color; editorState.tool = 'pen'; hidePhotoSelectUI(); setActiveToolUI(); });
   });
-  document.querySelectorAll('.size-dot').forEach(dot => {
-    dot.addEventListener('click', () => { editorState.size = Number(dot.dataset.size); setActiveToolUI(); });
+  /* ---- Size slider: continuous drag-to-adjust stroke size, replacing the old 5 discrete presets
+     (Apple's lock-screen clock-weight slider is the closest real-world analogue Kevin pointed at:
+     a thin-to-thick track you drag along, with live visual feedback of the current thickness).
+     Pen and eraser now track two independent values (editorState.size / editorState.eraserSize) —
+     this same slider just displays/edits whichever one is relevant to the current tool, so it
+     also decouples the object eraser's hit-test tolerance from whatever the pen happens to be
+     set to (previously a known open issue). Ranges are fixed constants matching the CSS exactly,
+     rather than read from layout, so the very first sync (on editor open, before the toolbar has
+     necessarily been laid out/painted yet) can't compute against a stale 0-width element.
+     Eraser gets its own, larger range (and default) than the pen — a bigger stroke/hit-test size
+     is more appropriate for erasing than for drawing, and the two are never meant to line up. */
+  const PEN_SIZE_MIN = 4, PEN_SIZE_MAX = 32;
+  const ERASER_SIZE_MIN = 8, ERASER_SIZE_MAX = 64;
+  const SIZE_SLIDER_INSET = 14, SIZE_SLIDER_TRACK_W = 90; /* 118px slider width - 14px inset each side */
+  const sizeSlider = document.getElementById('sizeSlider');
+  const sizeSliderThumb = document.getElementById('sizeSliderThumb');
+  const sizeSliderDot = document.getElementById('sizeSliderDot');
+  function currentSizeRange(){
+    return editorState.tool === 'eraser' ? { min: ERASER_SIZE_MIN, max: ERASER_SIZE_MAX } : { min: PEN_SIZE_MIN, max: PEN_SIZE_MAX };
+  }
+  function currentSizeValue(){
+    return editorState.tool === 'eraser' ? editorState.eraserSize : editorState.size;
+  }
+  function setCurrentSizeValue(v){
+    const range = currentSizeRange();
+    const clamped = Math.max(range.min, Math.min(range.max, v));
+    if(editorState.tool === 'eraser') editorState.eraserSize = clamped; else editorState.size = clamped;
+    return clamped;
+  }
+  function updateSizeSliderUI(){
+    const range = currentSizeRange();
+    const t = (currentSizeValue() - range.min) / (range.max - range.min);
+    sizeSliderThumb.style.left = (SIZE_SLIDER_INSET + t * SIZE_SLIDER_TRACK_W) + 'px';
+    const dotSize = 5 + t * 17; /* 5px..22px visual dot inside the 26px thumb */
+    sizeSliderDot.style.width = dotSize + 'px';
+    sizeSliderDot.style.height = dotSize + 'px';
+  }
+  function sizeSliderValueFromClientX(clientX){
+    const range = currentSizeRange();
+    const rect = sizeSlider.getBoundingClientRect();
+    const x = Math.max(0, Math.min(SIZE_SLIDER_TRACK_W, clientX - rect.left - SIZE_SLIDER_INSET));
+    const t = x / SIZE_SLIDER_TRACK_W;
+    return range.min + t * (range.max - range.min);
+  }
+  let sizeSliderDragging = false;
+  sizeSlider.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    e.stopPropagation(); /* keep this from also being seen by the toolbar's own scroll-drag listener */
+    sizeSliderDragging = true;
+    try{ sizeSlider.setPointerCapture(e.pointerId); }catch(err){}
+    setCurrentSizeValue(sizeSliderValueFromClientX(e.clientX));
+    updateSizeSliderUI();
   });
+  sizeSlider.addEventListener('pointermove', e => {
+    if(!sizeSliderDragging) return;
+    e.stopPropagation();
+    setCurrentSizeValue(sizeSliderValueFromClientX(e.clientX));
+    updateSizeSliderUI();
+  });
+  function endSizeSliderDrag(e){
+    if(!sizeSliderDragging) return;
+    sizeSliderDragging = false;
+    e.stopPropagation();
+    try{ sizeSlider.releasePointerCapture(e.pointerId); }catch(err){}
+  }
+  sizeSlider.addEventListener('pointerup', endSizeSliderDrag);
+  sizeSlider.addEventListener('pointercancel', endSizeSliderDrag);
   document.getElementById('undoBtn').addEventListener('click', () => {
     if(editorState.actions.length === 0) return;
     clearSelection();

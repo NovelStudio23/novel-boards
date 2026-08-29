@@ -10,7 +10,7 @@
   show up (this does NOT touch or delete anyone's saved projects; those live
   in localStorage, a completely separate storage from this cache).
 */
-const CACHE_VERSION = 'v62';
+const CACHE_VERSION = 'v64';
 const CACHE_NAME = `novel-boards-${CACHE_VERSION}`;
 
 // Everything the app needs to run fully offline. Single-file app, plus the
