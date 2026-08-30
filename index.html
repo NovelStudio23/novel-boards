@@ -52,7 +52,7 @@
      which it needs to override. Removed the instant the hold is ruled out (moved/lifted) or
      succeeds, so a genuine text-selection drag right after is completely unaffected. */
   .notes.longpress-armed .note-line{ -webkit-user-select:none; user-select:none; }
-  html,body{ margin:0; height:100%; height:-webkit-fill-available; overflow:hidden; overscroll-behavior:none; background:var(--bg); }
+  html,body{ margin:0; height:100%; overflow:hidden; overscroll-behavior:none; background:var(--bg); }
   body{ font-family:var(--font-body); color:var(--text); }
   button, input, textarea{ font-family:inherit; color:inherit; }
   button{ appearance:none; -webkit-appearance:none; background:none; border:none; padding:0; cursor:pointer; transition:transform .12s ease, opacity .12s ease, background .15s ease, border-color .15s ease; }
@@ -67,7 +67,7 @@
     *{ animation-duration:.001ms !important; transition-duration:.001ms !important; }
   }
 
-  #app{ height:100vh; height:100dvh; height:-webkit-fill-available; display:flex; flex-direction:column; }
+  #app{ height:100vh; height:100dvh; display:flex; flex-direction:column; }
 
   /* ---------- Top bar ---------- */
   .topbar{
