@@ -162,7 +162,19 @@
     z-index:40; padding-top:env(safe-area-inset-top);
   }
   .sidebar.open{ transform:translateX(0); }
-  .sidebar-scroll{ flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch; }
+  .sidebar-scroll{ flex:1 1 auto; overflow-y:auto; -webkit-overflow-scrolling:touch; scrollbar-width:none; -ms-overflow-style:none; }
+  .sidebar-scroll::-webkit-scrollbar{ display:none; width:0; height:0; }
+  /* Replacement for the native scroll indicator, exactly mirroring .tile-scrollbar (see its own
+     comment for the full rationale) — .scene-row uses touch-action:none for its own long-press-
+     drag-to-reorder gesture, which means any scroll that starts on a scene row is driven manually
+     via scrollTo() rather than a native touch-pan, and the native overlay indicator doesn't
+     reliably track that. Driven directly off real scroll position on every 'scroll' event instead,
+     so it can't desync regardless of which gesture (native pan on project rows/trash list, or a
+     scene-row-driven scrollTo) actually caused the scroll. */
+  .sidebar-scrollbar{ position:absolute; z-index:3; pointer-events:none; opacity:0; transition:opacity .25s ease; }
+  .sidebar-scrollbar.show{ opacity:1; }
+  .sidebar-scrollbar-thumb{ position:absolute; background:rgba(255,255,255,.4); border-radius:3px; pointer-events:auto; }
+  .sidebar-scrollbar-thumb:active{ background:rgba(255,255,255,.65); }
 
   .folder-header-row{ display:flex; align-items:center; padding:14px 10px 10px 16px; gap:2px; position:relative; }
   .folder-header-toggle{
@@ -310,16 +322,29 @@
     box-shadow: inset 0 10px 18px -14px rgba(0,0,0,.55);
     scroll-behavior:smooth; -webkit-overflow-scrolling:touch;
     touch-action:pan-x;
+    scrollbar-width:none; -ms-overflow-style:none;
   }
+  .filmstrip::-webkit-scrollbar{ display:none; width:0; height:0; }
+  /* Normal View's replacement for the native scroll indicator — same reasoning as
+     .tile-scrollbar (see its own comment): .notes now drives the filmstrip manually via
+     scrollTo() whenever a drag starts there (touch-action:none — see setupNotesLongPress), the
+     same "sometimes native pan, sometimes programmatic scrollTo" situation Tile View already
+     has, and the native overlay indicator doesn't reliably track that. This also replaces the
+     old color-scheme:light attempt below, which — going by this still not being visible on
+     device — apparently doesn't actually affect iOS's overlay indicator the way it does a
+     desktop browser's classic scrollbar; full manual control sidesteps that entirely. Thumb color
+     flips dark/light to match whichever background is actually showing (edge-to-edge white cards
+     in view-mode vs. the dark padded --bg-well well otherwise). */
+  .filmstrip-scrollbar{ position:absolute; z-index:3; pointer-events:none; opacity:0; transition:opacity .25s ease; }
+  .filmstrip-scrollbar.show{ opacity:1; }
+  .filmstrip-scrollbar-thumb{ position:absolute; background:rgba(255,255,255,.55); border-radius:3px; pointer-events:auto; }
+  .filmstrip-scrollbar-thumb:active{ background:rgba(255,255,255,.8); }
+  body.view-mode .filmstrip-scrollbar-thumb{ background:rgba(0,0,0,.32); }
+  body.view-mode .filmstrip-scrollbar-thumb:active{ background:rgba(0,0,0,.5); }
   body.view-mode .filmstrip{ padding:0; box-shadow:none; }
   /* Normal View (and Trash, which always uses this same layout) fills the filmstrip edge-to-edge
-     with white cards once Done is pressed. The rest of the app is dark, so the OS's native
-     momentum-scroll indicator defaults to its light/white variant for contrast against that — but
-     against these white cards specifically, a white indicator is nearly invisible. color-scheme is
-     the one CSS property Safari actually consults to decide the indicator's light/dark variant;
-     forcing it to 'light' here (this area only — never on tile-mode, whose gray background already
-     shows the white indicator fine) makes Safari pick the dark-on-light variant instead. */
-  body.view-mode .filmstrip:not(.tile-mode){ color-scheme:light; }
+     with white cards once Done is pressed — see .filmstrip-scrollbar above for how the scroll
+     indicator's color is handled against that background. */
 
   /* Select mode is edit-mode-only (see selectBtn), so this never has to coexist with
      body.view-mode's padding:0 above — the base edit-mode padding always applies here first,
@@ -519,7 +544,8 @@
   .frame-hint span{ font-size:11px; }
 
   /* ---------- Notes (line-by-line) ---------- */
-  .card .notes{ flex:1 1 auto; min-height:0; min-width:0; background:var(--paper); position:relative; }
+  .card .notes{ flex:1 1 auto; min-height:0; min-width:0; background:var(--paper); position:relative; touch-action:none; }
+  body.select-mode .card .notes{ touch-action:auto; }
   @media (orientation: portrait){ .card .notes{ height:100%; } }
   .notes-lines{
     position:relative; height:100%; width:100%; min-width:0; overflow-y:hidden; overflow-x:hidden;
@@ -1010,6 +1036,7 @@
         </div>
         <input type="file" id="importInput" accept="application/json,.json" hidden>
       </div>
+      <div class="sidebar-scrollbar" id="sidebarScrollbar"><div class="sidebar-scrollbar-thumb" id="sidebarScrollbarThumb"></div></div>
     </aside>
     <div class="backdrop" id="backdrop"></div>
 
@@ -1020,6 +1047,7 @@
       </div>
       <div class="sprockets-bottom"></div>
       <div class="tile-scrollbar" id="tileScrollbar"><div class="tile-scrollbar-thumb" id="tileScrollbarThumb"></div></div>
+      <div class="filmstrip-scrollbar" id="filmstripScrollbar"><div class="filmstrip-scrollbar-thumb" id="filmstripScrollbarThumb"></div></div>
       <div class="nav-buttons hidden" id="navButtons">
         <button id="navFirstBtn" class="nav-btn" aria-label="Jump to first shot"></button>
         <button id="navLastBtn" class="nav-btn" aria-label="Jump to last shot"></button>
@@ -1584,6 +1612,11 @@
   const filmstripEl = document.getElementById('filmstrip');
   const tileScrollbarEl = document.getElementById('tileScrollbar');
   const tileScrollbarThumbEl = document.getElementById('tileScrollbarThumb');
+  const filmstripScrollbarEl = document.getElementById('filmstripScrollbar');
+  const filmstripScrollbarThumbEl = document.getElementById('filmstripScrollbarThumb');
+  const sidebarScrollEl = document.querySelector('.sidebar-scroll');
+  const sidebarScrollbarEl = document.getElementById('sidebarScrollbar');
+  const sidebarScrollbarThumbEl = document.getElementById('sidebarScrollbarThumb');
   const sidebarListEl = document.getElementById('sidebarSceneList');
   const projectsListEl = document.getElementById('projectsList');
   const sidebarEl = document.getElementById('sidebar');
@@ -1739,7 +1772,7 @@
   });
 
   /* ===================== Sidebar open/close ===================== */
-  function openSidebar(){ sidebarEl.classList.add('open'); backdropEl.classList.add('show'); }
+  function openSidebar(){ sidebarEl.classList.add('open'); backdropEl.classList.add('show'); updateSidebarScrollbar(); }
   function closeSidebar(){ sidebarEl.classList.remove('open'); backdropEl.classList.remove('show'); document.getElementById('projectSortMenu').classList.remove('open'); }
   document.getElementById('sidebarToggle').addEventListener('click', () => {
     sidebarEl.classList.contains('open') ? closeSidebar() : openSidebar();
@@ -1748,6 +1781,7 @@
 
   document.getElementById('projectsFolderToggle').addEventListener('click', () => {
     document.getElementById('projectsFolderSection').classList.toggle('collapsed');
+    requestAnimationFrame(updateSidebarScrollbar);
   });
 
   document.getElementById('topUndoBtn').addEventListener('click', doUndo);
@@ -1763,6 +1797,7 @@
        against Normal View's own handle-drag scrolling (onHandlePointerDown), making the
        scrollbar/content look like it's jumping around erratically. */
     if(tileMomentumCancel){ tileMomentumCancel(); tileMomentumCancel = null; }
+    if(notesMomentumCancel){ notesMomentumCancel(); notesMomentumCancel = null; }
     viewMode = m;
     document.getElementById('viewBasicBtn').classList.toggle('active', m === 'basic');
     document.getElementById('viewTileBtn').classList.toggle('active', m === 'tile');
@@ -1943,6 +1978,157 @@
     document.addEventListener('pointercancel', onUp);
   });
 
+  /* ===================== Normal View custom scrollbar ===================== */
+  /* Mirrors the Tile scrollbar above exactly, just gated the opposite way (shown whenever NOT in
+     tile mode). Needed for the same reason: .notes now drives the filmstrip manually via
+     scrollTo() whenever a drag starts there (touch-action:none — see setupNotesLongPress), so the
+     native overlay indicator can't reliably track it here either. This is also what actually
+     controls the indicator's color now (dark against view-mode's white cards, light otherwise) —
+     see the .filmstrip-scrollbar CSS comment for why the old color-scheme approach is gone. */
+  let filmstripScrollbarHideTimer = null;
+  function updateFilmstripScrollbar(){
+    if(viewMode === 'tile'){ filmstripScrollbarEl.classList.remove('show'); return; }
+    const portrait = isPortrait();
+    const inset = 8;
+    if(portrait){
+      const max = filmstripEl.scrollHeight - filmstripEl.clientHeight;
+      const trackLen = filmstripEl.offsetHeight - inset * 2;
+      filmstripScrollbarEl.style.top = (filmstripEl.offsetTop + inset) + 'px';
+      filmstripScrollbarEl.style.left = (filmstripEl.offsetLeft + filmstripEl.offsetWidth - 7) + 'px';
+      filmstripScrollbarEl.style.width = '5px';
+      filmstripScrollbarEl.style.height = trackLen + 'px';
+      if(max <= 0){ filmstripScrollbarEl.classList.remove('show'); return; }
+      const thumbLen = Math.max(28, trackLen * (filmstripEl.clientHeight / filmstripEl.scrollHeight));
+      const travel = trackLen - thumbLen;
+      const frac = filmstripEl.scrollTop / max;
+      filmstripScrollbarThumbEl.style.top = (travel * frac) + 'px';
+      filmstripScrollbarThumbEl.style.left = '0px';
+      filmstripScrollbarThumbEl.style.width = '5px';
+      filmstripScrollbarThumbEl.style.height = thumbLen + 'px';
+    } else {
+      const max = filmstripEl.scrollWidth - filmstripEl.clientWidth;
+      const trackLen = filmstripEl.offsetWidth - inset * 2;
+      filmstripScrollbarEl.style.left = (filmstripEl.offsetLeft + inset) + 'px';
+      filmstripScrollbarEl.style.top = (filmstripEl.offsetTop + filmstripEl.offsetHeight - 7) + 'px';
+      filmstripScrollbarEl.style.height = '5px';
+      filmstripScrollbarEl.style.width = trackLen + 'px';
+      if(max <= 0){ filmstripScrollbarEl.classList.remove('show'); return; }
+      const thumbLen = Math.max(28, trackLen * (filmstripEl.clientWidth / filmstripEl.scrollWidth));
+      const travel = trackLen - thumbLen;
+      const frac = filmstripEl.scrollLeft / max;
+      filmstripScrollbarThumbEl.style.left = (travel * frac) + 'px';
+      filmstripScrollbarThumbEl.style.top = '0px';
+      filmstripScrollbarThumbEl.style.height = '5px';
+      filmstripScrollbarThumbEl.style.width = thumbLen + 'px';
+    }
+    filmstripScrollbarEl.classList.add('show');
+  }
+  filmstripEl.addEventListener('scroll', () => {
+    if(viewMode === 'tile') return;
+    updateFilmstripScrollbar();
+    clearTimeout(filmstripScrollbarHideTimer);
+    filmstripScrollbarHideTimer = setTimeout(() => filmstripScrollbarEl.classList.remove('show'), 700);
+  }, { passive: true });
+  filmstripScrollbarThumbEl.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if(notesMomentumCancel){ notesMomentumCancel(); notesMomentumCancel = null; }
+    const portrait = isPortrait();
+    const pointerId = e.pointerId;
+    filmstripScrollbarThumbEl.setPointerCapture(pointerId);
+    clearTimeout(filmstripScrollbarHideTimer);
+    const startClient = portrait ? e.clientY : e.clientX;
+    const startScroll = portrait ? filmstripEl.scrollTop : filmstripEl.scrollLeft;
+    const max = portrait ? (filmstripEl.scrollHeight - filmstripEl.clientHeight) : (filmstripEl.scrollWidth - filmstripEl.clientWidth);
+    const trackLen = (portrait ? filmstripEl.offsetHeight : filmstripEl.offsetWidth) - 16;
+    const thumbLen = portrait ? filmstripScrollbarThumbEl.offsetHeight : filmstripScrollbarThumbEl.offsetWidth;
+    const travel = Math.max(1, trackLen - thumbLen);
+    function onMove(ev){
+      if(ev.pointerId !== pointerId) return;
+      const delta = (portrait ? ev.clientY : ev.clientX) - startClient;
+      const next = Math.max(0, Math.min(max, startScroll + (delta / travel) * max));
+      if(portrait) filmstripEl.scrollTo({ top: next, behavior: 'instant' });
+      else filmstripEl.scrollTo({ left: next, behavior: 'instant' });
+    }
+    function onUp(ev){
+      if(ev.pointerId !== pointerId) return;
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      filmstripScrollbarHideTimer = setTimeout(() => filmstripScrollbarEl.classList.remove('show'), 700);
+    }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+  });
+
+  /* Sidebar's replacement for its native scroll indicator — same rationale as
+     updateTileScrollbar above: .scene-row uses touch-action:none for its own long-press-drag-to-
+     reorder gesture, so any scroll starting on a scene row is driven manually via scrollTo()
+     (see onSceneItemPointerDown) rather than a native touch-pan, and the native overlay indicator
+     doesn't reliably track that — it can lag, show the wrong position, or drift the wrong
+     direction entirely. Recomputed directly from real scroll geometry on every 'scroll' event
+     instead, so it can't desync no matter which gesture (native pan on the projects/trash list,
+     or a scene-row-driven scrollTo) actually caused the scroll. Vertical-only, unlike Tile's
+     dual-axis version, since .sidebar-scroll only ever scrolls on Y. */
+  let sidebarScrollbarHideTimer = null;
+  function updateSidebarScrollbar(){
+    if(!sidebarEl.classList.contains('open')){ sidebarScrollbarEl.classList.remove('show'); return; }
+    const inset = 8;
+    const max = sidebarScrollEl.scrollHeight - sidebarScrollEl.clientHeight;
+    const trackLen = sidebarScrollEl.offsetHeight - inset * 2;
+    sidebarScrollbarEl.style.top = (sidebarScrollEl.offsetTop + inset) + 'px';
+    sidebarScrollbarEl.style.left = (sidebarScrollEl.offsetLeft + sidebarScrollEl.offsetWidth - 7) + 'px';
+    sidebarScrollbarEl.style.width = '5px';
+    sidebarScrollbarEl.style.height = trackLen + 'px';
+    if(max <= 0){ sidebarScrollbarEl.classList.remove('show'); return; }
+    const thumbLen = Math.max(28, trackLen * (sidebarScrollEl.clientHeight / sidebarScrollEl.scrollHeight));
+    const travel = trackLen - thumbLen;
+    const frac = sidebarScrollEl.scrollTop / max;
+    sidebarScrollbarThumbEl.style.top = (travel * frac) + 'px';
+    sidebarScrollbarThumbEl.style.left = '0px';
+    sidebarScrollbarThumbEl.style.width = '5px';
+    sidebarScrollbarThumbEl.style.height = thumbLen + 'px';
+    sidebarScrollbarEl.classList.add('show');
+  }
+  sidebarScrollEl.addEventListener('scroll', () => {
+    updateSidebarScrollbar();
+    clearTimeout(sidebarScrollbarHideTimer);
+    sidebarScrollbarHideTimer = setTimeout(() => sidebarScrollbarEl.classList.remove('show'), 700);
+  }, { passive: true });
+  /* Lets the thumb itself be grabbed and dragged directly too, same convenience Tile's thumb
+     offers, kept working here even though the native scrollbar is hidden for this container. */
+  sidebarScrollbarThumbEl.addEventListener('pointerdown', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    if(sceneMomentumCancel){ sceneMomentumCancel(); sceneMomentumCancel = null; }
+    const pointerId = e.pointerId;
+    sidebarScrollbarThumbEl.setPointerCapture(pointerId);
+    clearTimeout(sidebarScrollbarHideTimer);
+    const startClient = e.clientY;
+    const startScroll = sidebarScrollEl.scrollTop;
+    const max = sidebarScrollEl.scrollHeight - sidebarScrollEl.clientHeight;
+    const trackLen = sidebarScrollEl.offsetHeight - 16;
+    const thumbLen = sidebarScrollbarThumbEl.offsetHeight;
+    const travel = Math.max(1, trackLen - thumbLen);
+    function onMove(ev){
+      if(ev.pointerId !== pointerId) return;
+      const delta = ev.clientY - startClient;
+      const next = Math.max(0, Math.min(max, startScroll + (delta / travel) * max));
+      sidebarScrollEl.scrollTo({ top: next, behavior: 'instant' });
+    }
+    function onUp(ev){
+      if(ev.pointerId !== pointerId) return;
+      document.removeEventListener('pointermove', onMove);
+      document.removeEventListener('pointerup', onUp);
+      document.removeEventListener('pointercancel', onUp);
+      sidebarScrollbarHideTimer = setTimeout(() => sidebarScrollbarEl.classList.remove('show'), 700);
+    }
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp);
+    document.addEventListener('pointercancel', onUp);
+  });
+
   let orientationRestoreTimer = null;
   let pendingOrientationRestoreId = null;
   let orientationBatchActive = false;
@@ -1994,6 +2180,7 @@
          the new resolution via its own redrawEditor() call. */
       if(editorModal.classList.contains('open')) resizeEditorCanvasForDPI();
       updateTileScrollbar();
+      updateFilmstripScrollbar();
       reflowAllVisibleNotes();
     }, 120);
   }
@@ -2025,6 +2212,7 @@
       el.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true';
     });
     notesExpandLines.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true';
+    updateFilmstripScrollbar();
   }
   editToggleBtn.addEventListener('click', () => setEditMode(!editMode));
 
@@ -2214,6 +2402,7 @@
     updateSelectToolbar();
     updateNavButtonsVisibility();
     updateTileScrollbar();
+    updateFilmstripScrollbar();
   }
 
   function buildEmptyState(){
@@ -3106,38 +3295,78 @@
     return tmp.innerHTML;
   }
 
+  let notesMomentumCancel = null;
   function setupNotesLongPress(notesWrap, cut){
-    let timer = null, cancelled = false, startX = 0, startY = 0;
     notesWrap.addEventListener('pointerdown', e => {
       if(selectMode) return;
-      cancelled = false;
-      startX = e.clientX; startY = e.clientY;
-      clearTimeout(timer);
+      if(e.pointerType === 'mouse' && e.button !== 0) return;
+      if(notesMomentumCancel){ notesMomentumCancel(); notesMomentumCancel = null; }
+      const pointerId = e.pointerId;
+      const startX = e.clientX, startY = e.clientY;
+      const axis = isPortrait() ? 'y' : 'x';
+      const startScrollPos = axis === 'y' ? filmstripEl.scrollTop : filmstripEl.scrollLeft;
+      const velTracker = createVelocityTracker(axis === 'y' ? startY : startX);
+      let phase = 'idle'; /* idle -> scrolling | longpress, or a plain tap, or cancelled */
+
       /* See the .longpress-armed CSS comment: suppressed only while this specific hold could
-         still become an expand-open, restored the moment it's ruled out or it succeeds. */
+         still become an expand-open, restored the moment it's ruled out or it succeeds. Now
+         mostly defense-in-depth — touch-action:none on .notes already stops WebKit's own native
+         long-press text-selection gesture from starting here at all, which used to be able to
+         race ahead of this class toggle in some spots (e.g. near a screen edge). */
       notesWrap.classList.add('longpress-armed');
-      timer = setTimeout(() => {
+      const timer = setTimeout(() => {
+        if(phase !== 'idle') return;
+        phase = 'longpress';
         notesWrap.classList.remove('longpress-armed');
-        if(cancelled) return;
         const rect = notesWrap.getBoundingClientRect();
         openNotesExpand(cut, notesWrap, rect);
       }, 480);
-      const onMove = ev => {
-        if(Math.hypot(ev.clientX - startX, ev.clientY - startY) > 12){
-          cancelled = true; clearTimeout(timer);
-          notesWrap.classList.remove('longpress-armed');
-          document.removeEventListener('pointermove', onMove);
-          document.removeEventListener('pointerup', onUp);
+
+      function onMove(ev){
+        if(ev.pointerId !== pointerId) return;
+        const dist = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+        if(phase === 'idle'){
+          if(dist > 10){
+            /* Moved before the long-press fired — take this over as a manual scroll of the main
+               filmstrip (touch-action:none on .notes means native pan never gets a head start —
+               same reasoning as onSceneItemPointerDown/onTilePointerDown use it for). Axis matches
+               whichever way the filmstrip actually scrolls in the current orientation. */
+            phase = 'scrolling';
+            clearTimeout(timer);
+            notesWrap.classList.remove('longpress-armed');
+            velTracker.reset(axis === 'y' ? ev.clientY : ev.clientX);
+          }
+        } else if(phase === 'scrolling'){
+          const cur = axis === 'y' ? ev.clientY : ev.clientX;
+          const start = axis === 'y' ? startY : startX;
+          if(axis === 'y') filmstripEl.scrollTo({ top: startScrollPos - (cur - start), behavior: 'instant' });
+          else filmstripEl.scrollTo({ left: startScrollPos - (cur - start), behavior: 'instant' });
+          velTracker.sample(cur);
         }
-      };
-      const onUp = () => {
-        cancelled = true; clearTimeout(timer);
+      }
+      function onUp(ev){
+        if(ev.pointerId !== pointerId) return;
+        clearTimeout(timer);
+        const wasScrolling = phase === 'scrolling';
         notesWrap.classList.remove('longpress-armed');
+        cleanup();
+        if(wasScrolling){
+          const perFrame = velocityToPerFrame(velTracker);
+          if(perFrame !== null) notesMomentumCancel = startMomentumScroll(filmstripEl, axis, perFrame);
+        }
+        /* phase 'idle' here (no movement, timer never fired) is a genuine tap — deliberately left
+           alone. Nothing above ever called preventDefault, so the browser's own native touch-to-
+           click synthesis still fires normally and focuses/places the caret exactly where tapped,
+           same as it always has. */
+      }
+      function cleanup(){
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
-      };
+        document.removeEventListener('pointercancel', onUp);
+      }
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
+      document.addEventListener('pointercancel', onUp);
     });
   }
 
@@ -4349,6 +4578,7 @@
   }
   document.getElementById('trashFolderToggle').addEventListener('click', () => {
     document.getElementById('trashFolderSection').classList.toggle('collapsed');
+    requestAnimationFrame(updateSidebarScrollbar);
   });
   document.getElementById('trashSelectBtn').addEventListener('click', toggleSelectMode);
   document.getElementById('selectBtn').addEventListener('click', toggleSelectMode);
@@ -4398,6 +4628,7 @@
       empty.className = 'sidebar-empty';
       empty.textContent = 'No scenes assigned yet.';
       sidebarListEl.appendChild(empty);
+      requestAnimationFrame(updateSidebarScrollbar);
       return;
     }
     groups.forEach(g => {
@@ -4427,6 +4658,7 @@
       item.addEventListener('pointerdown', e => onSceneItemPointerDown(e, g.scene, g.firstId, item, row, { restrictedMode: selectableHere }));
       sidebarListEl.appendChild(row);
     });
+    requestAnimationFrame(updateSidebarScrollbar);
   }
 
   let openSceneMenuId = null;
@@ -4833,6 +5065,7 @@
     renderProjectsList();
     renderScenesList();
     renderTrashProjectsList();
+    requestAnimationFrame(updateSidebarScrollbar);
   }
 
   async function switchProject(id){
