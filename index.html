@@ -3334,9 +3334,12 @@
             phase = 'scrolling';
             clearTimeout(timer);
             notesWrap.classList.remove('longpress-armed');
+            try{ notesWrap.setPointerCapture(pointerId); }catch(err){}
             velTracker.reset(axis === 'y' ? ev.clientY : ev.clientX);
           }
-        } else if(phase === 'scrolling'){
+        }
+        if(phase === 'scrolling'){
+          ev.preventDefault();
           const cur = axis === 'y' ? ev.clientY : ev.clientX;
           const start = axis === 'y' ? startY : startX;
           if(axis === 'y') filmstripEl.scrollTo({ top: startScrollPos - (cur - start), behavior: 'instant' });
@@ -3363,6 +3366,7 @@
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
         document.removeEventListener('pointercancel', onUp);
+        try{ notesWrap.releasePointerCapture(pointerId); }catch(err){}
       }
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
