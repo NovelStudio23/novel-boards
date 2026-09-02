@@ -3326,7 +3326,7 @@
         if(ev.pointerId !== pointerId) return;
         const dist = Math.hypot(ev.clientX - startX, ev.clientY - startY);
         if(phase === 'idle'){
-          if(dist > 10){
+          if(dist > 8){
             /* Moved before the long-press fired — take this over as a manual scroll of the main
                filmstrip (touch-action:none on .notes means native pan never gets a head start —
                same reasoning as onSceneItemPointerDown/onTilePointerDown use it for). Axis matches
@@ -3354,7 +3354,17 @@
         notesWrap.classList.remove('longpress-armed');
         cleanup();
         if(wasScrolling){
-          const perFrame = velocityToPerFrame(velTracker);
+          let perFrame = velocityToPerFrame(velTracker);
+          /* Portrait's cards run ~36% shorter than landscape's (measured directly, not a fixed
+             guess: portrait's flex-direction:row + aspect-ratio:3.7 layout is a wide, short
+             strip, vs landscape's flex-direction:column stacking frame above notes). Scrolling
+             physics are identical in both axes — same drag produces the same pixel distance
+             either way — but that pixel distance then sweeps past proportionally more cards in
+             portrait, which is what reads as "too much scroll in one go" even for an ordinary
+             flick. Scaling portrait's momentum down brings the felt cards-per-flick rate back in
+             line with landscape's, without touching landscape's own (already-right) feel or any
+             of the shared tile/scene-row momentum tuning. */
+          if(perFrame !== null && axis === 'y') perFrame *= 0.6;
           if(perFrame !== null) notesMomentumCancel = startMomentumScroll(filmstripEl, axis, perFrame);
         }
         /* phase 'idle' here (no movement, timer never fired) is a genuine tap — deliberately left
