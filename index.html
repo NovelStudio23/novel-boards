@@ -2975,13 +2975,6 @@
     const wrap = document.createElement('div');
     wrap.className = 'notes-lines';
     buildLinesInto(cut, wrap);
-    wrap.addEventListener('pointerdown', e => {
-      if(!editMode || selectMode) return;
-      if(e.target.classList && e.target.classList.contains('note-line')) return;
-      const lines = wrap.querySelectorAll('.note-line');
-      const last = lines[lines.length - 1];
-      if(last){ last.focus(); placeCaretAtEnd(last); }
-    });
     return wrap;
   }
 
@@ -3301,6 +3294,12 @@
       if(selectMode) return;
       if(e.pointerType === 'mouse' && e.button !== 0) return;
       if(notesMomentumCancel){ notesMomentumCancel(); notesMomentumCancel = null; }
+      /* iOS Safari can focus a contenteditable element (and raise the keyboard) the moment a
+         finger touches it, before it's even clear whether this will become a tap, a scroll, or a
+         long-press-to-expand — that eager native focus is what was activating a note immediately
+         on touch, including mid-scroll. Suppressing the default here and handling focus/caret
+         placement ourselves on release (see onUp) is the standard fix for this class of bug. */
+      e.preventDefault();
       const pointerId = e.pointerId;
       const startX = e.clientX, startY = e.clientY;
       const axis = isPortrait() ? 'y' : 'x';
@@ -3350,27 +3349,43 @@
       function onUp(ev){
         if(ev.pointerId !== pointerId) return;
         clearTimeout(timer);
+        const wasIdle = phase === 'idle';
         const wasScrolling = phase === 'scrolling';
         notesWrap.classList.remove('longpress-armed');
         cleanup();
         if(wasScrolling){
-          let perFrame = velocityToPerFrame(velTracker);
-          /* Portrait's cards run ~36% shorter than landscape's (measured directly, not a fixed
-             guess: portrait's flex-direction:row + aspect-ratio:3.7 layout is a wide, short
-             strip, vs landscape's flex-direction:column stacking frame above notes). Scrolling
-             physics are identical in both axes — same drag produces the same pixel distance
-             either way — but that pixel distance then sweeps past proportionally more cards in
-             portrait, which is what reads as "too much scroll in one go" even for an ordinary
-             flick. Scaling portrait's momentum down brings the felt cards-per-flick rate back in
-             line with landscape's, without touching landscape's own (already-right) feel or any
-             of the shared tile/scene-row momentum tuning. */
-          if(perFrame !== null && axis === 'y') perFrame *= 0.6;
+          /* Deliberately identical for both axes — no per-orientation scaling. A portrait-only
+             momentum reduction was tried here previously (motivated by portrait's shorter cards
+             meaning the same pixel distance sweeps past more cards there) but was reverted: the
+             two axes now share the exact same physics, matching whatever landscape already does. */
+          const perFrame = velocityToPerFrame(velTracker);
           if(perFrame !== null) notesMomentumCancel = startMomentumScroll(filmstripEl, axis, perFrame);
+        } else if(wasIdle){
+          /* A genuine tap — no movement, timer never fired. Since the native focus-on-touch was
+             suppressed above, replicate it manually here on release: find whichever .note-line is
+             actually under the finger and place the caret at the exact tapped character, the same
+             as an ordinary click would. Falls back to the last line if the tap landed in the empty
+             padding area below the last written line, rather than directly on note text. */
+          const hit = document.elementFromPoint(ev.clientX, ev.clientY);
+          let target = hit ? hit.closest('.note-line') : null;
+          let placeAtPoint = true;
+          if(!target){
+            const lines = notesWrap.querySelectorAll('.note-line');
+            target = lines[lines.length - 1] || null;
+            placeAtPoint = false;
+          }
+          if(target && target.isContentEditable){
+            target.focus();
+            const range = placeAtPoint && document.caretRangeFromPoint ? document.caretRangeFromPoint(ev.clientX, ev.clientY) : null;
+            if(range){
+              const sel = window.getSelection();
+              sel.removeAllRanges();
+              sel.addRange(range);
+            } else {
+              placeCaretAtEnd(target);
+            }
+          }
         }
-        /* phase 'idle' here (no movement, timer never fired) is a genuine tap — deliberately left
-           alone. Nothing above ever called preventDefault, so the browser's own native touch-to-
-           click synthesis still fires normally and focuses/places the caret exactly where tapped,
-           same as it always has. */
       }
       function cleanup(){
         document.removeEventListener('pointermove', onMove);
