@@ -5452,34 +5452,44 @@
      The cost is a slightly smaller image on paper; the benefit is that nothing is ever cut off and
      the page count is predictable. */
   const MM_PX = 96 / 25.4;
-  const PRINT_PAGE_W_MM = 180, PRINT_PAGE_H_MM = 252, PRINT_PAGE_PAD_MM = 8;
+  /* These two numbers are measured, not assumed. A printed page was pulled off the device and
+     the ink measured against the sheet:
+       - the paper is US Letter (215.9 x 279.4mm), NOT A4. The printed page came back at a
+         1300:1682 px ratio = 0.773, which is Letter's 0.7727 and nothing like A4's 0.707.
+       - Safari's own margins are ~14.3mm left / 14.8mm right, ~13mm top, and it reserves a band
+         from roughly 245mm down for the URL/date/page-number footer.
+     So the real usable area is about 187mm x 222mm, and a page box any bigger than that gets
+     broken in half by the print engine — which is exactly what was happening: each 252mm page was
+     splitting into two, doubling the page count and slicing the fourth panel (and the fifth shot
+     row) off at the fold. 175 x 215mm sits inside the measured area with a margin for error, and
+     is also safely inside A4's printable width, so the same numbers hold on either paper. */
+  const PRINT_PAGE_W_MM = 175, PRINT_PAGE_H_MM = 215, PRINT_PAGE_PAD_MM = 7;
   const PRINT_CONTENT_W = (PRINT_PAGE_W_MM - 2 * PRINT_PAGE_PAD_MM) * MM_PX;
   const PRINT_CONTENT_H = (PRINT_PAGE_H_MM - 2 * PRINT_PAGE_PAD_MM) * MM_PX;
   const PDF_FRAME_RATIO_W = 1332, PDF_FRAME_RATIO_H = 720;
   const PDF_FRAME_RATIO = PDF_FRAME_RATIO_W / PDF_FRAME_RATIO_H;
 
-  /* Vertical: 5 shot rows plus one scene header per page. The frame is derived from that budget
-     rather than picked and checked afterwards, so the "5 to a page" promise is the definition of
-     the size, not a coincidence of it. */
-  const VERTICAL_ROWS_PER_PAGE = 5;
-  const VERTICAL_HEADER_H = 46;          /* scene header incl. its bottom margin + rule */
-  const VERTICAL_ROW_CHROME = 3 * 2 + 8 * 2 + 7;   /* border + padding + margin-bottom */
+  /* Vertical: 4 shot rows plus one scene header per page. The frame is derived from that budget
+     rather than picked and checked afterwards, so the per-page count is the definition of the
+     frame size, not a coincidence of it — change the count and everything else follows. */
+  const VERTICAL_ROWS_PER_PAGE = 4;
+  const VERTICAL_HEADER_H = 29;                    /* measured: 21px box + 8px bottom margin */
+  const VERTICAL_ROW_CHROME = 2 * 2 + 6 * 2 + 5;   /* border + padding + margin-bottom */
   const VERTICAL_PAGE_SLACK = 8;   /* px held back so sub-pixel rounding can never spill a 6th row */
   const VERTICAL_FRAME_H = Math.floor(((PRINT_CONTENT_H - VERTICAL_HEADER_H - VERTICAL_PAGE_SLACK) / VERTICAL_ROWS_PER_PAGE - VERTICAL_ROW_CHROME) * 100) / 100;
   const VERTICAL_FRAME_W = Math.round(VERTICAL_FRAME_H * PDF_FRAME_RATIO * 100) / 100;
   const VERTICAL_ROW_H = VERTICAL_FRAME_H + VERTICAL_ROW_CHROME;
-  /* Notes keep their 11px/1.6 type; only the capacity changes, since the column is bounded by the
-     frame's height. One ruled line costs 11 * 1.6 + 2px padding + 1px rule. */
-  const VERTICAL_NOTE_LINE_H = 20.6;
+  const VERTICAL_NOTE_LINE_H = 20.6;               /* 11px * 1.6 + 2px padding + 1px rule */
   const VERTICAL_MAX_NOTE_LINES = Math.floor((VERTICAL_FRAME_H - 2) / VERTICAL_NOTE_LINE_H);
 
-  /* Horizontal: 4 x 2 = 8 panels on a landscape page, with the notes strip taking whatever height
-     the grid leaves over so the sheet is filled top to bottom. The ruled rows are deliberately
-     taller than the type they hold (25px rows for 11.5px text) — at the previous 18px the
-     ascenders and descenders were being clipped and the lines read as one solid block. */
-  const HORIZONTAL_PANELS_PER_ROW = 4;
+  /* Horizontal: 3 x 2 = 6 panels on a landscape page. Three across makes each frame a good deal
+     wider, which takes height out of the panel's own budget — so the notes strip carries fewer
+     ruled rows than it did at four across. The type size is unchanged; only the row count moves.
+     The ruled rows stay deliberately taller than the type they hold (25px rows for 11.5px text)
+     so ascenders and descenders clear the rule. */
+  const HORIZONTAL_PANELS_PER_ROW = 3;
   const HORIZONTAL_PANEL_ROWS = 2;
-  const HORIZONTAL_MAX_NOTE_LINES = 6;
+  const HORIZONTAL_MAX_NOTE_LINES = 5;
   const HORIZONTAL_NOTE_ROW_H = 24;      /* + 1px rule = 25px per line */
 
   /* Plain-text note lines for export, trimmed of trailing blanks — deliberately NOT
@@ -5585,7 +5595,7 @@
       '.page-canvas{ width:100%; height:100%; padding:' + PRINT_PAGE_PAD_MM + 'mm; }' +
       '.scene-header{ font-weight:800; font-size:13px; letter-spacing:.06em; text-transform:uppercase; margin:16px 0 8px; padding-bottom:4px; border-bottom:2px solid #111; }' +
       '.scene-header:first-child{ margin-top:0; }' +
-      '.shot-row{ display:flex; align-items:flex-start; gap:14px; border:3px solid #111; padding:8px; margin-bottom:7px; }' +
+      '.shot-row{ display:flex; align-items:flex-start; gap:12px; border:2px solid #111; padding:6px; margin-bottom:5px; }' +
       '.frame-col{ flex:0 0 auto; width:' + VERTICAL_FRAME_W + 'px; text-align:left; }' +
       '.frame-box{ position:relative; width:' + VERTICAL_FRAME_W + 'px; height:' + VERTICAL_FRAME_H + 'px; border:1px solid #111; overflow:hidden; background:#eee; display:flex; align-items:center; justify-content:center; }' +
       '.frame-box img{ width:100%; height:100%; object-fit:contain; }' +
@@ -5655,7 +5665,7 @@
       /* The landscape canvas: the page box's own dimensions, swapped. */
       '.page-canvas{ position:absolute; top:50%; left:50%; width:' + PRINT_PAGE_H_MM + 'mm; height:' + PRINT_PAGE_W_MM + 'mm; padding:' + PRINT_PAGE_PAD_MM + 'mm; overflow:hidden; }' +
       '.page-header{ font-weight:800; font-size:13px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:4mm; padding-bottom:2mm; border-bottom:1.5px solid #111; }' +
-      '.panel-grid{ display:grid; grid-template-columns:repeat(' + HORIZONTAL_PANELS_PER_ROW + ',1fr); grid-auto-rows:auto; gap:6mm; width:100%; justify-content:start; align-content:start; }' +
+      '.panel-grid{ display:grid; grid-template-columns:repeat(' + HORIZONTAL_PANELS_PER_ROW + ',1fr); grid-auto-rows:auto; gap:5mm; width:100%; justify-content:start; align-content:start; }' +
       /* The panel carries no aspect ratio of its own. Its image area does — the shot's true
          1332:720 — and the notes strip below is a fixed height holding exactly
          HORIZONTAL_MAX_NOTE_LINES ruled rows, so the panel is as tall as those two add up to. */
@@ -5666,7 +5676,10 @@
       /* The extra vertical padding here is what squares the page up: it spends the leftover room
          below the second panel row so the grid ends the same distance from the bottom edge as the
          header sits from the top, and gives the ruled lines air at the same time. */
-      '.panel-notes{ flex:0 0 auto; padding:10px 7px; border-top:1.5px solid #111; }' +
+      /* The generous vertical padding is what squares the page up: it spends the room the two
+         panel rows leave over so the grid ends the same distance from the bottom edge as the
+         header sits from the top, and gives the ruled lines air at the same time. */
+      '.panel-notes{ flex:0 0 auto; padding:11px 6px; border-top:1.5px solid #111; }' +
       /* One ruled row per line, fixed height, no wrapping — Horizontal is the deliberately
          truncating layout. The row is comfortably taller than the type it holds so ascenders and
          descenders clear the rule instead of being sliced by it, and so the lines read as a ruled
@@ -5717,17 +5730,11 @@
   let pendingPdfName = null;
   function renderPdfPreview(){
     const groups = getSelectedGroupRange(getExportSceneGroups());
+    /* The signature is taken from the document without its title, so the title it then receives
+       can't feed back into the name that produced it. */
     const neutral = buildCurrentExportHtml(groups, 'Storyboard');
-    pendingPdfName = null;
-    pdfPreviewFrame.srcdoc = neutral;
-    nextPdfDocTitle(neutral).then(rec => {
-      /* Guard against a slower lookup landing after the person changed layout or scene range —
-         only the most recent request may claim the preview. */
-      const current = buildCurrentExportHtml(getSelectedGroupRange(getExportSceneGroups()), 'Storyboard');
-      if(current !== neutral) return;
-      pendingPdfName = rec;
-      pdfPreviewFrame.srcdoc = buildCurrentExportHtml(getSelectedGroupRange(getExportSceneGroups()), rec.name);
-    });
+    pendingPdfName = nextPdfDocTitle(neutral);
+    pdfPreviewFrame.srcdoc = buildCurrentExportHtml(groups, pendingPdfName.name);
   }
   function buildCurrentExportHtml(groups, docTitle){
     return pdfExportLayout === 'vertical'
@@ -5744,9 +5751,10 @@
      1 and collide all over again). The signature check means a genuinely identical re-export — same
      layout, same scene range, same content — deliberately reuses its previous name rather than
      burning a new number on a duplicate file. */
+  const PDF_FILENAME_PREFIX = 'Novel Boards';
   function sanitizePdfFilenameBase(title){
     const cleaned = String(title || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
-    return (cleaned || 'Storyboard').slice(0, 60);
+    return PDF_FILENAME_PREFIX + '_' + (cleaned || 'Storyboard').slice(0, 60);
   }
   function hashExportHtml(html){
     /* Cheap non-cryptographic signature (FNV-1a) — this only ever has to answer "is this byte-for
@@ -5758,22 +5766,38 @@
     }
     return h.toString(36) + ':' + html.length;
   }
-  /* Works out what THIS export would be called, without recording it. Called while building the
-     preview, so the finished name is already baked into the document by the time Export is pressed
-     and the click handler has nothing to await. commitPdfDocTitle() records it afterwards. */
-  async function nextPdfDocTitle(html){
+  /* The stored per-project counter is read ONCE, into memory, when the export overlay opens, so
+     that working out this export's name is a plain synchronous function afterwards.
+     It has to be synchronous: the name is what the document's <title> carries, and the title is
+     what iOS calls the saved PDF. When the lookup was awaited inline, pressing Export before the
+     await resolved left the name unset and the PDF fell back to the host page's own title —
+     "Novel Boards" — which is exactly the reported symptom of the first export being named
+     correctly and every one after it not. */
+  const pdfNameRecords = Object.create(null);
+  async function loadPdfNameRecord(pid){
+    try{
+      const raw = await storGet('pdf-export-name:' + pid);
+      pdfNameRecords[pid] = raw ? JSON.parse(raw) : null;
+    }catch(e){ pdfNameRecords[pid] = null; }
+  }
+  /* Name shape is Novel Boards_<project title>_<n>, always numbered — including the first, so the
+     naming is consistent rather than "no number, then _2". */
+  function nextPdfDocTitle(html){
     const pid = currentProjectId;
     const base = sanitizePdfFilenameBase(state.title);
     const sig = hashExportHtml(html);
-    let rec = null;
-    try{ const raw = await storGet('pdf-export-name:' + pid); if(raw) rec = JSON.parse(raw); }catch(e){}
+    const rec = pdfNameRecords[pid] || null;
+    /* A byte-identical re-export deliberately keeps its previous name instead of burning a new
+       number on a duplicate file. */
     if(rec && rec.base === base && rec.sig === sig && rec.name) return { pid, base, sig, seq: rec.seq, name: rec.name };
     const seq = (rec && rec.base === base && typeof rec.seq === 'number' ? rec.seq : 0) + 1;
-    return { pid, base, sig, seq, name: seq === 1 ? base : base + '_' + seq };
+    return { pid, base, sig, seq, name: base + '_' + seq };
   }
   function commitPdfDocTitle(rec){
     if(!rec) return;
-    storSet('pdf-export-name:' + rec.pid, JSON.stringify({ base: rec.base, seq: rec.seq, sig: rec.sig, name: rec.name }));
+    const stored = { base: rec.base, seq: rec.seq, sig: rec.sig, name: rec.name };
+    pdfNameRecords[rec.pid] = stored;
+    storSet('pdf-export-name:' + rec.pid, JSON.stringify(stored));
   }
 
   /* ---- Printing without leaving the app, and without tripping the auto-print block ----
@@ -5810,6 +5834,10 @@
   }
 
   function openPdfExport(){
+    /* Hydrate the name counter before anything can press Export — see loadPdfNameRecord. Rendering
+       the preview again once it lands keeps the name in the document correct even if the read was
+       slow; if it was already cached, this is a no-op re-render. */
+    loadPdfNameRecord(currentProjectId).then(() => { if(pdfExportPanel.classList.contains('show')) renderPdfPreview(); });
     pdfExportLayout = 'vertical';
     document.querySelectorAll('.pdf-layout-btn').forEach(b => b.classList.toggle('active', b.dataset.layout === 'vertical'));
     populatePdfSceneRange(getExportSceneGroups());
