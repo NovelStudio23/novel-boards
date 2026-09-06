@@ -544,9 +544,8 @@
   .frame-hint span{ font-size:11px; }
 
   /* ---------- Notes (line-by-line) ---------- */
-  .card .notes{ flex:1 1 auto; min-height:0; min-width:0; background:var(--paper); position:relative; touch-action:none; }
-  body.select-mode .card .notes{ touch-action:auto; }
-  @media (orientation: portrait){ .card .notes{ height:100%; } }
+  .card .notes{ flex:1 1 auto; min-height:0; min-width:0; background:var(--paper); position:relative; touch-action:pan-x; }
+  @media (orientation: portrait){ .card .notes{ touch-action:pan-y; height:100%; } }
   .notes-lines{
     position:relative; height:100%; width:100%; min-width:0; overflow-y:hidden; overflow-x:hidden;
     display:flex; flex-direction:column; padding:0 0 10px;
@@ -1797,7 +1796,6 @@
        against Normal View's own handle-drag scrolling (onHandlePointerDown), making the
        scrollbar/content look like it's jumping around erratically. */
     if(tileMomentumCancel){ tileMomentumCancel(); tileMomentumCancel = null; }
-    if(notesMomentumCancel){ notesMomentumCancel(); notesMomentumCancel = null; }
     viewMode = m;
     document.getElementById('viewBasicBtn').classList.toggle('active', m === 'basic');
     document.getElementById('viewTileBtn').classList.toggle('active', m === 'tile');
@@ -2032,7 +2030,6 @@
   filmstripScrollbarThumbEl.addEventListener('pointerdown', e => {
     e.preventDefault();
     e.stopPropagation();
-    if(notesMomentumCancel){ notesMomentumCancel(); notesMomentumCancel = null; }
     const portrait = isPortrait();
     const pointerId = e.pointerId;
     filmstripScrollbarThumbEl.setPointerCapture(pointerId);
@@ -2936,6 +2933,60 @@
     sel.removeAllRanges();
     sel.addRange(range);
   }
+  /* Walks el's text nodes to find the exact node+offset for a given overall character count,
+     then collapses the caret there — used for landing precisely at the join point after an
+     explicit line merge (see onLineKeydown's Backspace handling), where "the end" or "the start"
+     isn't the right spot. Falls back to the end of el if offset lands past all of its text. */
+  function placeCaretAtTextOffset(el, offset){
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let node = walker.nextNode();
+    let remaining = offset;
+    while(node){
+      if(remaining <= node.length){
+        const range = document.createRange();
+        range.setStart(node, remaining);
+        range.collapse(true);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        return;
+      }
+      remaining -= node.length;
+      node = walker.nextNode();
+    }
+    placeCaretAtEnd(el);
+  }
+  /* True if the current selection's start position has no actual text between it and the start
+     of el — i.e. the caret reads as "at the start of this line" regardless of how many empty
+     nested formatting elements it has to pass through to get there. */
+  function isCaretAtStartOf(el, range){
+    const probe = document.createRange();
+    probe.selectNodeContents(el);
+    try{ probe.setEnd(range.startContainer, range.startOffset); }catch(err){ return false; }
+    return probe.toString() === '';
+  }
+  /* Mirror of isCaretAtStartOf, for the end of el instead. */
+  function isCaretAtEndOf(el, range){
+    const probe = document.createRange();
+    probe.selectNodeContents(el);
+    try{ probe.setStart(range.startContainer, range.startOffset); }catch(err){ return false; }
+    return probe.toString() === '';
+  }
+  /* Repeatedly removes trailing <br> elements and trailing empty text nodes from el, stopping at
+     the first node that actually has content. An "empty" contenteditable line commonly isn't
+     literally childless — a lone <br> is often followed by an empty text node the caret can sit
+     in, which innerHTML doesn't reveal (empty text nodes don't serialize) but which is still a
+     real DOM node that would otherwise get carried along into whatever this line merges into. */
+  function stripTrailingEmptyNodes(el){
+    while(el.lastChild){
+      const last = el.lastChild;
+      if(last.nodeName === 'BR' || (last.nodeType === 3 && last.textContent === '')){
+        el.removeChild(last);
+      } else {
+        break;
+      }
+    }
+  }
 
   function getRichLinesForCut(cut){
     let htmlLines;
@@ -3195,6 +3246,44 @@
       if(idx < lines.length - 1){ e.preventDefault(); focusLineIn(wrap, lines[idx + 1], true); }
     } else if(e.key === 'ArrowUp'){
       if(idx > 0){ e.preventDefault(); focusLineIn(wrap, lines[idx - 1], true); }
+    } else if(e.key === 'Backspace'){
+      if(!div.isContentEditable) return;
+      const sel = window.getSelection();
+      if(!sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      if(!range.collapsed) return; /* an actual selection — native delete-the-selection is fine, scoped to visible content within whichever line(s) it spans */
+      if(!isCaretAtStartOf(div, range)) return; /* ordinary in-line backspace — native single-character deletion is fine here */
+      if(idx === 0) return; /* nothing above to merge into */
+      e.preventDefault();
+      const prevLine = lines[idx - 1];
+      const mergeOffset = prevLine.textContent.length;
+      stripTrailingEmptyNodes(div);
+      while(div.firstChild) prevLine.appendChild(div.firstChild);
+      wrap.removeChild(div);
+      checkLineOverflow(cut, wrap, prevLine, { silent: true });
+      trimTrailingEmptyLines(wrap);
+      syncNotesFromLines(cut, wrap);
+      if(wrap === notesExpandLines) notesExpandLines.focus(); else prevLine.focus();
+      placeCaretAtTextOffset(prevLine, mergeOffset);
+    } else if(e.key === 'Delete'){
+      if(!div.isContentEditable) return;
+      const sel = window.getSelection();
+      if(!sel.rangeCount) return;
+      const range = sel.getRangeAt(0);
+      if(!range.collapsed) return; /* an actual selection — native delete-the-selection is fine */
+      if(!isCaretAtEndOf(div, range)) return; /* ordinary in-line forward-delete is fine here */
+      if(idx >= lines.length - 1) return; /* nothing below to merge in */
+      e.preventDefault();
+      const nextLine = lines[idx + 1];
+      const mergeOffset = div.textContent.length;
+      stripTrailingEmptyNodes(nextLine);
+      while(nextLine.firstChild) div.appendChild(nextLine.firstChild);
+      wrap.removeChild(nextLine);
+      checkLineOverflow(cut, wrap, div, { silent: true });
+      trimTrailingEmptyLines(wrap);
+      syncNotesFromLines(cut, wrap);
+      if(wrap === notesExpandLines) notesExpandLines.focus(); else div.focus();
+      placeCaretAtTextOffset(div, mergeOffset);
     }
   }
 
@@ -3288,114 +3377,59 @@
     return tmp.innerHTML;
   }
 
-  let notesMomentumCancel = null;
   function setupNotesLongPress(notesWrap, cut){
+    let timer = null;
+    let startX = 0, startY = 0;
+    let cancelled = false;
     notesWrap.addEventListener('pointerdown', e => {
       if(selectMode) return;
       if(e.pointerType === 'mouse' && e.button !== 0) return;
-      if(notesMomentumCancel){ notesMomentumCancel(); notesMomentumCancel = null; }
-      /* iOS Safari can focus a contenteditable element (and raise the keyboard) the moment a
-         finger touches it, before it's even clear whether this will become a tap, a scroll, or a
-         long-press-to-expand — that eager native focus is what was activating a note immediately
-         on touch, including mid-scroll. Suppressing the default here and handling focus/caret
-         placement ourselves on release (see onUp) is the standard fix for this class of bug. */
-      e.preventDefault();
-      const pointerId = e.pointerId;
-      const startX = e.clientX, startY = e.clientY;
-      const axis = isPortrait() ? 'y' : 'x';
-      const startScrollPos = axis === 'y' ? filmstripEl.scrollTop : filmstripEl.scrollLeft;
-      const velTracker = createVelocityTracker(axis === 'y' ? startY : startX);
-      let phase = 'idle'; /* idle -> scrolling | longpress, or a plain tap, or cancelled */
-
+      startX = e.clientX; startY = e.clientY;
+      cancelled = false;
+      clearTimeout(timer);
       /* See the .longpress-armed CSS comment: suppressed only while this specific hold could
-         still become an expand-open, restored the moment it's ruled out or it succeeds. Now
-         mostly defense-in-depth — touch-action:none on .notes already stops WebKit's own native
-         long-press text-selection gesture from starting here at all, which used to be able to
-         race ahead of this class toggle in some spots (e.g. near a screen edge). */
+         still become an expand-open, restored the moment it's ruled out or it succeeds. */
       notesWrap.classList.add('longpress-armed');
-      const timer = setTimeout(() => {
-        if(phase !== 'idle') return;
-        phase = 'longpress';
+      timer = setTimeout(() => {
         notesWrap.classList.remove('longpress-armed');
+        if(cancelled) return;
         const rect = notesWrap.getBoundingClientRect();
         openNotesExpand(cut, notesWrap, rect);
       }, 480);
-
-      function onMove(ev){
-        if(ev.pointerId !== pointerId) return;
-        const dist = Math.hypot(ev.clientX - startX, ev.clientY - startY);
-        if(phase === 'idle'){
-          if(dist > 8){
-            /* Moved before the long-press fired — take this over as a manual scroll of the main
-               filmstrip (touch-action:none on .notes means native pan never gets a head start —
-               same reasoning as onSceneItemPointerDown/onTilePointerDown use it for). Axis matches
-               whichever way the filmstrip actually scrolls in the current orientation. */
-            phase = 'scrolling';
-            clearTimeout(timer);
-            notesWrap.classList.remove('longpress-armed');
-            try{ notesWrap.setPointerCapture(pointerId); }catch(err){}
-            velTracker.reset(axis === 'y' ? ev.clientY : ev.clientX);
-          }
+      const onMove = ev => {
+        if(Math.hypot(ev.clientX - startX, ev.clientY - startY) > 10){
+          cancelled = true;
+          clearTimeout(timer);
+          notesWrap.classList.remove('longpress-armed');
+          document.removeEventListener('pointermove', onMove);
+          document.removeEventListener('pointerup', onUp);
+          document.removeEventListener('pointercancel', onUp);
         }
-        if(phase === 'scrolling'){
-          ev.preventDefault();
-          const cur = axis === 'y' ? ev.clientY : ev.clientX;
-          const start = axis === 'y' ? startY : startX;
-          if(axis === 'y') filmstripEl.scrollTo({ top: startScrollPos - (cur - start), behavior: 'instant' });
-          else filmstripEl.scrollTo({ left: startScrollPos - (cur - start), behavior: 'instant' });
-          velTracker.sample(cur);
-        }
-      }
-      function onUp(ev){
-        if(ev.pointerId !== pointerId) return;
+      };
+      const onUp = () => {
+        cancelled = true;
         clearTimeout(timer);
-        const wasIdle = phase === 'idle';
-        const wasScrolling = phase === 'scrolling';
         notesWrap.classList.remove('longpress-armed');
-        cleanup();
-        if(wasScrolling){
-          /* Deliberately identical for both axes — no per-orientation scaling. A portrait-only
-             momentum reduction was tried here previously (motivated by portrait's shorter cards
-             meaning the same pixel distance sweeps past more cards there) but was reverted: the
-             two axes now share the exact same physics, matching whatever landscape already does. */
-          const perFrame = velocityToPerFrame(velTracker);
-          if(perFrame !== null) notesMomentumCancel = startMomentumScroll(filmstripEl, axis, perFrame);
-        } else if(wasIdle){
-          /* A genuine tap — no movement, timer never fired. Since the native focus-on-touch was
-             suppressed above, replicate it manually here on release: find whichever .note-line is
-             actually under the finger and place the caret at the exact tapped character, the same
-             as an ordinary click would. Falls back to the last line if the tap landed in the empty
-             padding area below the last written line, rather than directly on note text. */
-          const hit = document.elementFromPoint(ev.clientX, ev.clientY);
-          let target = hit ? hit.closest('.note-line') : null;
-          let placeAtPoint = true;
-          if(!target){
-            const lines = notesWrap.querySelectorAll('.note-line');
-            target = lines[lines.length - 1] || null;
-            placeAtPoint = false;
-          }
-          if(target && target.isContentEditable){
-            target.focus();
-            const range = placeAtPoint && document.caretRangeFromPoint ? document.caretRangeFromPoint(ev.clientX, ev.clientY) : null;
-            if(range){
-              const sel = window.getSelection();
-              sel.removeAllRanges();
-              sel.addRange(range);
-            } else {
-              placeCaretAtEnd(target);
-            }
-          }
-        }
-      }
-      function cleanup(){
         document.removeEventListener('pointermove', onMove);
         document.removeEventListener('pointerup', onUp);
         document.removeEventListener('pointercancel', onUp);
-        try{ notesWrap.releasePointerCapture(pointerId); }catch(err){}
-      }
+      };
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
       document.addEventListener('pointercancel', onUp);
+    });
+    /* Tapping the empty padding area below the last written line focuses that line, mirroring
+       what tapping directly on note text already does via ordinary native click-to-focus. Uses
+       'click' rather than 'pointerdown' specifically because click only fires for a genuine tap-
+       without-drag (the browser's own tap-vs-pan distinction, the same one that now handles
+       scrolling for us) — so this can't fire eagerly mid-scroll the way a pointerdown-based
+       version could. */
+    notesWrap.addEventListener('click', e => {
+      if(!editMode || selectMode) return;
+      if(e.target.closest && e.target.closest('.note-line')) return;
+      const lines = notesWrap.querySelectorAll('.note-line');
+      const last = lines[lines.length - 1];
+      if(last){ last.focus(); placeCaretAtEnd(last); }
     });
   }
 
