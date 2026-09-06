@@ -52,7 +52,20 @@
      which it needs to override. Removed the instant the hold is ruled out (moved/lifted) or
      succeeds, so a genuine text-selection drag right after is completely unaffected. */
   .notes.longpress-armed .note-line{ -webkit-user-select:none; user-select:none; }
-  html,body{ margin:0; height:100%; overflow:hidden; overscroll-behavior:none; background:var(--bg); }
+  /* height:100vh, NOT height:100% — and #app is pinned with position:fixed rather than sized in
+     viewport units at all. This is the third attempt at the standalone-mode grey bottom bar, and
+     the first with an actual mechanism behind it: a percentage height on html/body makes WebKit
+     silently fall back to the non-cover layout even though the viewport meta asks for
+     viewport-fit=cover, so the whole document is laid out inside the *safe* viewport (which stops
+     short of the home-indicator strip) and body's own background is what shows through underneath.
+     That is exactly why the two previous fixes measured no change: both of them adjusted #app's
+     height unit, but #app was already correctly filling the shortened viewport it had been given —
+     the shortening happened one level up, here. 100dvh is separately unreliable on a PWA cold
+     start (it reports the wrong value until the first rotation), which is the one moment that
+     matters when opening from the home-screen icon, so it is no longer used for the shell.
+     overflow:hidden stays: body-level scrolling in standalone mode drags position:fixed children
+     with it. */
+  html,body{ margin:0; height:100vh; overflow:hidden; overscroll-behavior:none; background:var(--bg); }
   body{ font-family:var(--font-body); color:var(--text); }
   button, input, textarea{ font-family:inherit; color:inherit; }
   button{ appearance:none; -webkit-appearance:none; background:none; border:none; padding:0; cursor:pointer; transition:transform .12s ease, opacity .12s ease, background .15s ease, border-color .15s ease; }
@@ -67,7 +80,11 @@
     *{ animation-duration:.001ms !important; transition-duration:.001ms !important; }
   }
 
-  #app{ height:100vh; height:100dvh; display:flex; flex-direction:column; }
+  /* Pinned to the layout viewport by inset rather than by any height unit. Under viewport-fit=cover
+     that IS the full screen, edge to edge, so the shot cards' notes area reaches the physical
+     bottom of the display. (position:fixed here does not trap fixed-position descendants — only
+     transform/filter/will-change would, and #app carries none in its resting state.) */
+  #app{ position:fixed; inset:0; display:flex; flex-direction:column; }
 
   /* ---------- Top bar ---------- */
   .topbar{
@@ -262,8 +279,8 @@
   .backup-btn svg{ width:13px; height:13px; flex:0 0 auto; }
   .backup-btn:hover{ background:var(--bg-elevated-2); color:var(--text); }
 
-  .backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.42); opacity:0; pointer-events:none; transition:opacity .32s ease; z-index:35; }
-  .backdrop.show{ opacity:1; pointer-events:auto; }
+  .backdrop{ position:absolute; inset:0; background:rgba(0,0,0,.42); opacity:0; pointer-events:none; visibility:hidden; transition:opacity .32s ease, visibility 0s linear .32s; z-index:35; }
+  .backdrop.show{ opacity:1; pointer-events:auto;  visibility:visible; transition-delay:0s; }
 
   /* ---------- Stage / filmstrip ---------- */
   /* position:relative so the custom Tile View scrollbar overlay (position:absolute, added as a
@@ -599,8 +616,8 @@
   .notes-lines.expanded .notes-lines-filler{ display:none; }
 
   /* ---------- Notes expand overlay (long-press) ---------- */
-  .notes-expand-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; transition:opacity .28s ease; z-index:150; }
-  .notes-expand-backdrop.show{ opacity:1; pointer-events:auto; }
+  .notes-expand-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; visibility:hidden; transition:opacity .28s ease, visibility 0s linear .28s; z-index:150; }
+  .notes-expand-backdrop.show{ opacity:1; pointer-events:auto; visibility:visible; transition-delay:0s; }
   .notes-expand-panel{
     position:fixed; background:var(--paper); z-index:151; border-radius:18px; overflow:hidden;
     display:flex; flex-direction:column; box-shadow:0 30px 70px rgba(0,0,0,.5);
@@ -646,16 +663,21 @@
   .note-line[data-placeholder]:empty::before{ content:attr(data-placeholder); color:var(--ink-dim); pointer-events:none; }
 
   /* ---- PDF export overlay ---- */
-  .pdf-export-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.6); opacity:0; pointer-events:none; transition:opacity .25s ease; z-index:160; }
-  .pdf-export-backdrop.show{ opacity:1; pointer-events:auto; }
+  /* Closed overlays below all carry visibility:hidden, not just opacity:0 + pointer-events:none.
+     An invisible fixed box still sits in the hit-testing path in iOS standalone mode, and a
+     screen-centred one (the PDF export panel is 614x787, dead centre) swallows scroll gestures
+     started on top of it — the centre-screen dead zone. Each one's visibility transition is a 0s
+     step delayed until its own fade-out finishes, so close animations still play in full. */
+  .pdf-export-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.6); opacity:0; pointer-events:none; visibility:hidden; transition:opacity .25s ease, visibility 0s linear .25s; z-index:160; }
+  .pdf-export-backdrop.show{ opacity:1; pointer-events:auto;  visibility:visible; transition-delay:0s;}
   .pdf-export-panel{
     position:fixed; left:50%; top:50%; transform:translate(-50%,-50%) scale(.96);
     width:min(640px, 92vw); height:min(84vh, 820px); z-index:161;
     background:var(--bg-elevated); border-radius:18px; overflow:hidden;
     display:flex; flex-direction:column; box-shadow:0 30px 70px rgba(0,0,0,.5);
-    opacity:0; pointer-events:none; transition:opacity .22s ease, transform .22s ease;
+    opacity:0; pointer-events:none; visibility:hidden; transition:opacity .22s ease, transform .22s ease, visibility 0s linear .25s;
   }
-  .pdf-export-panel.show{ opacity:1; pointer-events:auto; transform:translate(-50%,-50%) scale(1); }
+  .pdf-export-panel.show{ opacity:1; pointer-events:auto; transform:translate(-50%,-50%) scale(1);  visibility:visible; transition-delay:0s; }
   .pdf-export-header{
     flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
     padding:14px 16px; border-bottom:1px solid var(--line); font-weight:700; font-size:14px;
@@ -815,10 +837,10 @@
   .toast{
     position:fixed; left:50%; bottom:28px; transform:translate(-50%,12px);
     background:rgba(24,24,27,.94); color:#fff; padding:10px 18px; border-radius:13px;
-    font-size:13px; opacity:0; pointer-events:none; z-index:200; backdrop-filter:blur(6px);
-    transition:opacity .25s ease, transform .25s ease; max-width:80vw; text-align:center;
+    font-size:13px; opacity:0; pointer-events:none; visibility:hidden; z-index:200; backdrop-filter:blur(6px);
+    transition:opacity .25s ease, transform .25s ease, visibility 0s linear .25s; max-width:80vw; text-align:center;
   }
-  .toast.show{ opacity:1; transform:translate(-50%,0); }
+  .toast.show{ opacity:1; transform:translate(-50%,0);  visibility:visible; transition-delay:0s; }
 
   /* Unlike .toast (auto-dismisses after ~2s), this stays visible until either a subsequent save
      succeeds (notifyStorageRecovered) or the person taps the dismiss button — losing data
@@ -827,37 +849,37 @@
     position:fixed; left:50%; top:calc(env(safe-area-inset-top, 0px) + 8px); transform:translateX(-50%);
     background:var(--danger); color:#fff; padding:9px 10px 9px 16px; border-radius:12px;
     font-size:12.5px; font-weight:600; z-index:300; display:flex; align-items:center; gap:10px;
-    opacity:0; pointer-events:none; transition:opacity .2s ease; max-width:88vw;
+    opacity:0; pointer-events:none; visibility:hidden; transition:opacity .2s ease, visibility 0s linear .25s; max-width:88vw;
     box-shadow:0 4px 14px rgba(0,0,0,.35);
   }
-  .storage-warning-banner.show{ opacity:1; pointer-events:auto; }
+  .storage-warning-banner.show{ opacity:1; pointer-events:auto;  visibility:visible; transition-delay:0s; }
   .storage-warning-banner button{
     background:rgba(255,255,255,.22); border:none; color:#fff; border-radius:8px; width:22px; height:22px;
     font-size:13px; line-height:1; flex:0 0 auto; display:flex; align-items:center; justify-content:center;
   }
 
-  .confirm-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.55); opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:250; }
-  .confirm-backdrop.show{ opacity:1; pointer-events:auto; }
+  .confirm-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.55); opacity:0; pointer-events:none; visibility:hidden; transition:opacity .2s ease, visibility 0s linear .2s; z-index:250; }
+  .confirm-backdrop.show{ opacity:1; pointer-events:auto;  visibility:visible; transition-delay:0s;}
   .confirm-modal{
     position:fixed; left:50%; top:50%; transform:translate(-50%,-48%); width:min(320px, 84vw);
     background:var(--bg-elevated); border-radius:16px; padding:20px 18px 16px; z-index:251;
-    opacity:0; pointer-events:none; transition:opacity .2s ease, transform .2s ease;
+    opacity:0; pointer-events:none; visibility:hidden; transition:opacity .2s ease, transform .2s ease, visibility 0s linear .2s;
     box-shadow:0 24px 60px rgba(0,0,0,.5);
   }
-  .confirm-modal.show{ opacity:1; pointer-events:auto; transform:translate(-50%,-50%); }
+  .confirm-modal.show{ opacity:1; pointer-events:auto; transform:translate(-50%,-50%);  visibility:visible; transition-delay:0s; }
   .confirm-modal p{ margin:0 0 18px; font-size:14px; line-height:1.5; color:var(--text); }
 
   /* Scene long-press popup (Rename / Move / Trash) — replaces the old inline chips, which
      squeezed the scene label into an unreadably narrow column once a third chip was added. */
-  .scene-action-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:250; }
-  .scene-action-backdrop.show{ opacity:1; pointer-events:auto; }
+  .scene-action-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; visibility:hidden; transition:opacity .2s ease, visibility 0s linear .2s; z-index:250; }
+  .scene-action-backdrop.show{ opacity:1; pointer-events:auto;  visibility:visible; transition-delay:0s;}
   .scene-action-sheet{
     position:fixed; width:190px;
     background:var(--bg-elevated); border-radius:14px; padding:6px; z-index:251;
-    opacity:0; pointer-events:none; transition:opacity .15s ease, transform .15s ease;
+    opacity:0; pointer-events:none; visibility:hidden; transition:opacity .15s ease, transform .15s ease, visibility 0s linear .2s;
     box-shadow:0 16px 40px rgba(0,0,0,.45); transform:scale(.95); transform-origin:top left;
   }
-  .scene-action-sheet.show{ opacity:1; pointer-events:auto; transform:scale(1); }
+  .scene-action-sheet.show{ opacity:1; pointer-events:auto; transform:scale(1);  visibility:visible; transition-delay:0s; }
   /* Export menu reuses .scene-action-sheet's look, but isn't anchored to a pressed row like the
      scene one is (JS-positioned) — it's opened from a single fixed sidebar-footer button, so it
      just centers in the viewport instead. */
@@ -910,8 +932,8 @@
   .select-action-btn{ padding:9px 14px; border-radius:12px; background:var(--bg-elevated-2); color:var(--text); font-size:12.5px; font-weight:700; border:1px solid var(--line-strong); white-space:nowrap; }
   .select-action-btn.danger{ background:var(--danger); color:#fff; border-color:var(--danger); }
 
-  .scene-picker-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; transition:opacity .2s ease; z-index:250; }
-  .scene-picker-backdrop.show{ opacity:1; pointer-events:auto; }
+  .scene-picker-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; visibility:hidden; transition:opacity .2s ease, visibility 0s linear .2s; z-index:250; }
+  .scene-picker-backdrop.show{ opacity:1; pointer-events:auto;  visibility:visible; transition-delay:0s;}
   .scene-picker-modal{
     position:fixed; left:50%; bottom:0; transform:translate(-50%,108%); width:min(420px, 92vw);
     max-height:70vh; background:var(--bg-elevated); border-radius:18px 18px 0 0; z-index:251;
@@ -1074,8 +1096,8 @@
     </div>
     <button id="notesExpandDone" class="notes-expand-done">Done</button>
   </div>
-  <div class="notes-format-toolbar" id="notesFormatToolbar">
-    <div class="notes-format-colors" id="notesColorSwatches">
+  <div class="notes-format-toolbar">
+    <div class="notes-format-colors">
       <button class="notes-color-swatch active" data-color="#221F1C" style="background:#221F1C"></button>
       <button class="notes-color-swatch" data-color="#E0502A" style="background:#E0502A"></button>
       <button class="notes-color-swatch" data-color="#2E6BE0" style="background:#2E6BE0"></button>
@@ -1103,11 +1125,11 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>
     </button>
   </div>
-  <div class="pdf-layout-toggle" id="pdfLayoutToggle">
+  <div class="pdf-layout-toggle">
     <button class="pdf-layout-btn active" data-layout="vertical">Vertical</button>
     <button class="pdf-layout-btn" data-layout="horizontal">Horizontal</button>
   </div>
-  <div class="pdf-scene-range" id="pdfSceneRange">
+  <div class="pdf-scene-range">
     <label class="pdf-scene-range-field">
       <span>From</span>
       <select id="pdfSceneFromSelect"></select>
@@ -1137,8 +1159,8 @@
 
   <div class="editor-canvas-wrap">
     <div class="editor-frame-inner" id="editorFrameInner">
-      <div class="frame-guide-239" id="editorGuide239"></div>
-      <div class="frame-guide-133" id="editorGuide133"></div>
+      <div class="frame-guide-239"></div>
+      <div class="frame-guide-133"></div>
       <canvas id="editorCanvas"></canvas>
       <div class="photo-select-box" id="photoSelectBox" style="display:none;">
         <button id="photoDeleteBtn" class="photo-delete-btn" aria-label="Delete photo">Delete</button>
@@ -1222,7 +1244,7 @@
 
 <div id="toast" class="toast"></div>
 <div id="storageWarningBanner" class="storage-warning-banner">
-  <span id="storageWarningText">Couldn't save — storage may be full</span>
+  <span>Couldn't save — storage may be full</span>
   <button id="storageWarningDismiss" aria-label="Dismiss">✕</button>
 </div>
 
@@ -1744,7 +1766,11 @@
       }
       row.addEventListener('click', () => {
         closeSearch();
-        jumpToCut(r.id, { instant: true });
+        /* Same smooth scroll the first/last nav buttons use. jumpToCut's default path animates
+           and delays the orange flash until the scroll lands; the earlier { instant:true } jump
+           existed only to make a search feel snappy, which Kevin has since asked to match the
+           rest of the app instead. */
+        jumpToCut(r.id);
       });
       searchResultsEl.appendChild(row);
     });
@@ -5412,31 +5438,49 @@
      export (the exact same document opened in a new tab, then window.print() — the person saves
      it as a PDF from Safari's own print sheet). */
   /* ---- Print geometry ----
-     Both layouts size their frame from ONE pair of numbers so the shot's real aspect ratio
-     (1332:720, the app's own canvas) is preserved exactly rather than re-derived per layout.
-     Vertical: the frame used to be 330x179 and only 4 rows cleared an A4 page. A4 portrait at a
-     14mm margin leaves 269mm ≈ 1016px of printable height; one row costs frameH + 16px padding +
-     6px border + 7px margin, and a scene header costs about 46px, so 5 rows need a frame no
-     taller than about (1016 - 46 - 5*29) / 5 ≈ 165px. 285px wide lands at 154.6px tall, which
-     puts a full page of 5 at roughly 964px with ~50px of slack for rounding — deliberately not
-     sized right up to the limit, since a hairline of overflow costs a whole extra page. */
+     Both layouts now draw onto an explicit, fixed-size .page box and paginate themselves, instead
+     of letting the print engine flow content and decide where pages break.
+     Why: Safari on iOS imposes its own page margins and draws a header (site + date) and footer
+     (page number) into them, no matter what @page asks for. Letting it paginate meant the real
+     printable height was smaller than the one the layout was designed against — which is how a
+     Vertical preview showing 5 shots to a page came out of the print sheet with only 3, and how
+     the Horizontal page's fourth column ran underneath the footer and got clipped. Drawing our own
+     page box, sized well inside anything Safari is likely to leave us, makes what the preview shows
+     and what actually prints the same thing.
+     PRINT_PAGE_W/H are deliberately smaller than A4 (210x297mm): the sheet keeps ~15mm on each
+     side and ~22mm top and bottom, which is where Safari's own margins, header and footer live.
+     The cost is a slightly smaller image on paper; the benefit is that nothing is ever cut off and
+     the page count is predictable. */
+  const MM_PX = 96 / 25.4;
+  const PRINT_PAGE_W_MM = 180, PRINT_PAGE_H_MM = 252, PRINT_PAGE_PAD_MM = 8;
+  const PRINT_CONTENT_W = (PRINT_PAGE_W_MM - 2 * PRINT_PAGE_PAD_MM) * MM_PX;
+  const PRINT_CONTENT_H = (PRINT_PAGE_H_MM - 2 * PRINT_PAGE_PAD_MM) * MM_PX;
   const PDF_FRAME_RATIO_W = 1332, PDF_FRAME_RATIO_H = 720;
-  const VERTICAL_FRAME_W = 285;
-  const VERTICAL_FRAME_H = Math.round(VERTICAL_FRAME_W * PDF_FRAME_RATIO_H / PDF_FRAME_RATIO_W * 100) / 100;
-  /* Notes keep their existing 11px/1.6 type exactly as-is; only the capacity changes, because
-     the column is now bounded by the (smaller) frame's height instead of growing without limit.
-     One ruled line costs 11 * 1.6 + 2px padding + 1px rule = 20.6px, so 7 lines (146.2px) is the
-     most that fits inside 154.6px. */
+  const PDF_FRAME_RATIO = PDF_FRAME_RATIO_W / PDF_FRAME_RATIO_H;
+
+  /* Vertical: 5 shot rows plus one scene header per page. The frame is derived from that budget
+     rather than picked and checked afterwards, so the "5 to a page" promise is the definition of
+     the size, not a coincidence of it. */
+  const VERTICAL_ROWS_PER_PAGE = 5;
+  const VERTICAL_HEADER_H = 46;          /* scene header incl. its bottom margin + rule */
+  const VERTICAL_ROW_CHROME = 3 * 2 + 8 * 2 + 7;   /* border + padding + margin-bottom */
+  const VERTICAL_PAGE_SLACK = 8;   /* px held back so sub-pixel rounding can never spill a 6th row */
+  const VERTICAL_FRAME_H = Math.floor(((PRINT_CONTENT_H - VERTICAL_HEADER_H - VERTICAL_PAGE_SLACK) / VERTICAL_ROWS_PER_PAGE - VERTICAL_ROW_CHROME) * 100) / 100;
+  const VERTICAL_FRAME_W = Math.round(VERTICAL_FRAME_H * PDF_FRAME_RATIO * 100) / 100;
+  const VERTICAL_ROW_H = VERTICAL_FRAME_H + VERTICAL_ROW_CHROME;
+  /* Notes keep their 11px/1.6 type; only the capacity changes, since the column is bounded by the
+     frame's height. One ruled line costs 11 * 1.6 + 2px padding + 1px rule. */
   const VERTICAL_NOTE_LINE_H = 20.6;
   const VERTICAL_MAX_NOTE_LINES = Math.floor((VERTICAL_FRAME_H - 2) / VERTICAL_NOTE_LINE_H);
-  /* Horizontal: 4 x 2 = 8 panels per landscape page. The notes strip is then sized to consume the
-     vertical room the 4-across grid leaves over — two rows of panel at the frame's own aspect
-     ratio only reach about two thirds of the way down the sheet, so rather than leave the bottom
-     of the page empty the strip takes the rest as extra ruled lines. 9 lines at an 18px row
-     (11.5px type, nudged up from 10.5) lands just inside that spare room with slack for rounding. */
-  const HORIZONTAL_MAX_NOTE_LINES = 9;
+
+  /* Horizontal: 4 x 2 = 8 panels on a landscape page, with the notes strip taking whatever height
+     the grid leaves over so the sheet is filled top to bottom. The ruled rows are deliberately
+     taller than the type they hold (25px rows for 11.5px text) — at the previous 18px the
+     ascenders and descenders were being clipped and the lines read as one solid block. */
   const HORIZONTAL_PANELS_PER_ROW = 4;
   const HORIZONTAL_PANEL_ROWS = 2;
+  const HORIZONTAL_MAX_NOTE_LINES = 6;
+  const HORIZONTAL_NOTE_ROW_H = 24;      /* + 1px rule = 25px per line */
 
   /* Plain-text note lines for export, trimmed of trailing blanks — deliberately NOT
      getRichLinesForCut/getNotesPlainText (Session 1's helper), which either pad to MIN_LINES
@@ -5482,19 +5526,44 @@
        it is inset, which each layout sets itself below. */
     '.frame-label{ position:absolute; z-index:2; background:rgba(0,0,0,.6); color:#fff; font-size:9.6px; font-weight:800; letter-spacing:.03em; padding:2px 5px; border-radius:3px; }';
 
-  function buildVerticalExportHtml(groups, docTitle){
-    const parts = [];
+  /* Walks the scene groups and packs them into fixed-height pages, measuring as it goes, instead
+     of emitting one long flow and hoping the print engine breaks it where we expected. A scene
+     header is never left stranded as the last thing on a page. */
+  function paginateVerticalItems(groups){
+    const pages = [];
+    let page = [], used = 0;
+    const flush = () => { if(page.length){ pages.push(page); page = []; used = 0; } };
     groups.forEach(g => {
-      parts.push('<div class="scene-header">' + escapeHtml(g.sceneText) + '</div>');
-      g.shots.forEach(s => {
-        /* The notes column is now a fixed-height area (it matches the frame's height), so it
-           holds exactly VERTICAL_MAX_NOTE_LINES ruled lines: any further lines are dropped, and a
-           shorter note is padded out with blank ruled slots so every row reads as the same piece
-           of ruled paper regardless of how much was written. */
+      /* A header only earns its place if at least one of its shots can follow it here. */
+      if(used + VERTICAL_HEADER_H + VERTICAL_ROW_H > PRINT_CONTENT_H) flush();
+      page.push({ type: 'header', text: g.sceneText });
+      used += VERTICAL_HEADER_H;
+      g.shots.forEach(shot => {
+        if(used + VERTICAL_ROW_H > PRINT_CONTENT_H){
+          flush();
+          /* Carry the scene name onto the continuation page so a split scene stays labelled. */
+          page.push({ type: 'header', text: g.sceneText });
+          used += VERTICAL_HEADER_H;
+        }
+        page.push({ type: 'shot', shot });
+        used += VERTICAL_ROW_H;
+      });
+    });
+    flush();
+    return pages;
+  }
+
+  function buildVerticalExportHtml(groups, docTitle){
+    const pages = paginateVerticalItems(groups).map(items => {
+      const inner = items.map(item => {
+        if(item.type === 'header') return '<div class="scene-header">' + escapeHtml(item.text) + '</div>';
+        const s = item.shot;
+        /* The notes column is a fixed-height area matching the frame, so it holds exactly
+           VERTICAL_MAX_NOTE_LINES ruled lines: further lines are dropped, and a shorter note is
+           padded with blank ruled slots so every row reads as the same piece of ruled paper. */
         const lines = s.noteLines.slice(0, VERTICAL_MAX_NOTE_LINES);
         while(lines.length < VERTICAL_MAX_NOTE_LINES) lines.push('');
-        parts.push(
-          '<div class="shot-row">' +
+        return '<div class="shot-row">' +
             '<div class="frame-col">' +
               '<div class="frame-box">' +
                 '<div class="frame-label">' + escapeHtml(s.label) + '</div>' +
@@ -5504,30 +5573,31 @@
             '<div class="notes-col">' +
               lines.map(l => '<div class="note-line">' + escapeHtml(l) + '</div>').join('') +
             '</div>' +
-          '</div>'
-        );
-      });
-    });
+          '</div>';
+      }).join('');
+      return '<div class="page"><div class="page-canvas">' + inner + '</div></div>';
+    }).join('');
+
     const css =
-      '@page{ size:A4 portrait; margin:14mm; }' +
-      '.scene-header{ font-weight:800; font-size:13px; letter-spacing:.06em; text-transform:uppercase; margin:16px 0 8px; padding-bottom:4px; border-bottom:2px solid #111; page-break-after:avoid; }' +
+      '@page{ size:A4 portrait; margin:0; }' +
+      '.page{ width:' + PRINT_PAGE_W_MM + 'mm; height:' + PRINT_PAGE_H_MM + 'mm; margin:0 auto; overflow:hidden; page-break-after:always; }' +
+      '.page:last-child{ page-break-after:auto; }' +
+      '.page-canvas{ width:100%; height:100%; padding:' + PRINT_PAGE_PAD_MM + 'mm; }' +
+      '.scene-header{ font-weight:800; font-size:13px; letter-spacing:.06em; text-transform:uppercase; margin:16px 0 8px; padding-bottom:4px; border-bottom:2px solid #111; }' +
       '.scene-header:first-child{ margin-top:0; }' +
-      '.shot-row{ display:flex; align-items:flex-start; gap:14px; border:3px solid #111; padding:8px; margin-bottom:7px; page-break-inside:avoid; }' +
-      /* Frame enlarged 50% in both dimensions per Kevin's request: 220x119 -> 330x179. Scene/shot
-         labels moved from separate rows outside the frame to small overlay badges on the frame
-         itself (top-left/top-right), which is why frame-box needs position:relative now. */
+      '.shot-row{ display:flex; align-items:flex-start; gap:14px; border:3px solid #111; padding:8px; margin-bottom:7px; }' +
       '.frame-col{ flex:0 0 auto; width:' + VERTICAL_FRAME_W + 'px; text-align:left; }' +
       '.frame-box{ position:relative; width:' + VERTICAL_FRAME_W + 'px; height:' + VERTICAL_FRAME_H + 'px; border:1px solid #111; overflow:hidden; background:#eee; display:flex; align-items:center; justify-content:center; }' +
       '.frame-box img{ width:100%; height:100%; object-fit:contain; }' +
       '.frame-label{ top:4px; left:4px; }' +
       /* Fixed height, matching the frame beside it: this is what makes a row's height fully
-         predictable and therefore what makes "5 to a page" hold no matter how long a note is. */
+         predictable and therefore what makes the page packing above exact. */
       '.notes-col{ flex:1 1 auto; min-width:0; height:' + VERTICAL_FRAME_H + 'px; overflow:hidden; border-left:1px solid #ccc; padding-left:12px; padding-top:2px; }' +
       '.note-line{ font-size:11px; line-height:1.6; border-bottom:1px solid #ddd; padding:1px 0; min-height:16px; }' +
-      '@media screen{ body{ background:#6b6b6e; padding:20px 0; } .doc-inner{ width:794px; margin:0 auto; background:#fff; padding:14mm; box-shadow:0 6px 20px rgba(0,0,0,.35); zoom:.58; } }' +
-      '@media print{ .doc-inner{ width:auto; margin:0; padding:0; box-shadow:none; background:none; } }';
+      '@media screen{ body{ background:#6b6b6e; padding:20px 0; } .page{ background:#fff; box-shadow:0 6px 20px rgba(0,0,0,.35); margin:0 auto 20px; zoom:.62; } }' +
+      '@media print{ .page{ box-shadow:none; } }';
     return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(docTitle || 'Storyboard') + '</title><style>' + PDF_BASE_CSS + css + '</style></head>' +
-      '<body><div class="doc-inner">' + parts.join('') + '</div></body></html>';
+      '<body>' + pages + '</body></html>';
   }
 
   function buildHorizontalExportHtml(groups, docTitle){
@@ -5568,39 +5638,49 @@
 
     /* Landscape pages, the long way round.
        @page{ size:A4 landscape } is simply ignored by Safari/WebKit (the size descriptor's
-       orientation values have never been implemented there), which is why a 297mm-wide page was
-       being laid onto a 210mm-wide sheet and the right-hand column was getting cut off. There is
-       no CSS switch that fixes this — the only reliable way to fill a landscape area on a sheet
-       Safari insists on treating as portrait is to lay the content out at landscape dimensions
-       and rotate it 90° onto the portrait page at print time. That's what .page-canvas is for:
-       a real 297x210mm box, upright on screen (so the preview reads normally), rotated into
-       place only under @media print. The printed/saved page is then A4 portrait carrying
-       landscape content — i.e. exactly what any printer does when you ask it for landscape. */
+       orientation values have never been implemented there), so the only reliable way to fill a
+       landscape area on a sheet Safari insists on treating as portrait is to lay the content out
+       at landscape dimensions and rotate it 90° onto the portrait page at print time.
+       The rotation is now anchored on the page's centre (translate(-50%,-50%)) rather than pinned
+       to a hard-coded 210mm offset from the left edge. The old pinned version assumed the printable
+       area really was the full 210mm width; when Safari reserved part of the sheet for its own
+       margins and page-number footer, the offset overshot and the far end of the rotated canvas —
+       the right-hand edge of the fourth panel — ran off the page. Centring, plus a page box
+       deliberately smaller than A4 (see PRINT_PAGE_W_MM), keeps the whole canvas inside whatever
+       Safari actually gives us. */
     const css =
       '@page{ size:A4 portrait; margin:0; }' +
-      '.page{ page-break-after:always; }' +
+      '.page{ position:relative; width:' + PRINT_PAGE_W_MM + 'mm; height:' + PRINT_PAGE_H_MM + 'mm; margin:0 auto; overflow:hidden; page-break-after:always; }' +
       '.page:last-child{ page-break-after:auto; }' +
-      '.page-canvas{ width:297mm; height:210mm; padding:10mm; overflow:hidden; }' +
-      '.page-header{ font-weight:800; font-size:13px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:5mm; padding-bottom:2mm; border-bottom:1.5px solid #111; }' +
-      '.panel-grid{ display:grid; grid-template-columns:repeat(' + HORIZONTAL_PANELS_PER_ROW + ',1fr); grid-auto-rows:auto; gap:7mm; width:100%; justify-content:start; align-content:start; }' +
-      /* The panel no longer carries a fixed aspect ratio of its own. Its image area does — set to
-         the shot's true 1332:720 — and the notes strip below it is a fixed height sized to hold
-         exactly HORIZONTAL_MAX_NOTE_LINES ruled lines, so the panel is simply as tall as those
-         two add up to. That's what keeps the frame's aspect ratio exact while letting the notes
-         strip grow to 5 lines without squeezing the image. */
+      /* The landscape canvas: the page box's own dimensions, swapped. */
+      '.page-canvas{ position:absolute; top:50%; left:50%; width:' + PRINT_PAGE_H_MM + 'mm; height:' + PRINT_PAGE_W_MM + 'mm; padding:' + PRINT_PAGE_PAD_MM + 'mm; overflow:hidden; }' +
+      '.page-header{ font-weight:800; font-size:13px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:4mm; padding-bottom:2mm; border-bottom:1.5px solid #111; }' +
+      '.panel-grid{ display:grid; grid-template-columns:repeat(' + HORIZONTAL_PANELS_PER_ROW + ',1fr); grid-auto-rows:auto; gap:6mm; width:100%; justify-content:start; align-content:start; }' +
+      /* The panel carries no aspect ratio of its own. Its image area does — the shot's true
+         1332:720 — and the notes strip below is a fixed height holding exactly
+         HORIZONTAL_MAX_NOTE_LINES ruled rows, so the panel is as tall as those two add up to. */
       '.panel{ border:2px solid #111; display:flex; flex-direction:column; overflow:hidden; }' +
       '.panel-frame{ position:relative; width:100%; aspect-ratio:' + PDF_FRAME_RATIO_W + '/' + PDF_FRAME_RATIO_H + '; flex:0 0 auto; background:#eee; display:flex; align-items:center; justify-content:center; }' +
       '.panel-frame img{ width:100%; height:100%; object-fit:contain; }' +
       '.frame-label{ top:3px; left:3px; }' +
-      '.panel-notes{ flex:0 0 auto; padding:3px 7px; border-top:1.5px solid #111; }' +
-      /* One ruled row per line, fixed height and no wrapping. The base stylesheet lets note text
-         wrap, which in a column this narrow turned a "5 line" strip into 5 double-height rows and
-         made panel heights uneven — Horizontal is the deliberately-truncating layout, so a line
-         too long for the strip is simply clipped at the edge instead. */
-      '.panel-notes .note-line{ font-size:11.5px; line-height:17px; height:17px; padding:0; border-bottom:1px solid #ccc; white-space:nowrap; overflow:hidden; }' +
-      '@media screen{ body{ background:#6b6b6e; padding:20px 0; } .page{ width:297mm; margin:0 auto 20px; background:#fff; box-shadow:0 6px 20px rgba(0,0,0,.35); zoom:.42; } }' +
-      '@media print{ .page{ position:relative; width:210mm; height:297mm; margin:0; overflow:hidden; box-shadow:none; }' +
-      ' .page-canvas{ position:absolute; top:0; left:0; transform-origin:0 0; transform:translateX(210mm) rotate(90deg); } }';
+      /* The extra vertical padding here is what squares the page up: it spends the leftover room
+         below the second panel row so the grid ends the same distance from the bottom edge as the
+         header sits from the top, and gives the ruled lines air at the same time. */
+      '.panel-notes{ flex:0 0 auto; padding:10px 7px; border-top:1.5px solid #111; }' +
+      /* One ruled row per line, fixed height, no wrapping — Horizontal is the deliberately
+         truncating layout. The row is comfortably taller than the type it holds so ascenders and
+         descenders clear the rule instead of being sliced by it, and so the lines read as a ruled
+         page rather than a solid block. */
+      '.panel-notes .note-line{ font-size:11.5px; line-height:' + HORIZONTAL_NOTE_ROW_H + 'px; height:' + HORIZONTAL_NOTE_ROW_H + 'px; padding:0; border-bottom:1px solid #ccc; white-space:nowrap; overflow:hidden; }' +
+      /* On screen the page is shown the way round the content actually reads — a landscape sheet,
+         canvas upright inside it. The 90° rotation onto a portrait sheet is a print-time-only
+         concern (Safari's refusal to honour landscape @page), so making the preview carry it too
+         would only force the reader to tilt their head. Same HTML, same layout, same measurements;
+         only which way the paper is turned differs. */
+      '@media screen{ body{ background:#6b6b6e; padding:20px 0; }' +
+      ' .page{ width:' + PRINT_PAGE_H_MM + 'mm; height:' + PRINT_PAGE_W_MM + 'mm; margin:0 auto 20px; background:#fff; box-shadow:0 6px 20px rgba(0,0,0,.35); zoom:.62; }' +
+      ' .page-canvas{ transform:translate(-50%,-50%); } }' +
+      '@media print{ .page{ box-shadow:none; } .page-canvas{ transform:translate(-50%,-50%) rotate(90deg); } }';
     return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(docTitle || 'Storyboard') + '</title><style>' + PDF_BASE_CSS + css + '</style></head>' +
       '<body>' + pagesHtml + '</body></html>';
   }
@@ -5631,9 +5711,23 @@
     if(from > to){ const t = from; from = to; to = t; } /* keep the range valid regardless of which select just changed */
     return groups.slice(from, to + 1);
   }
+  /* The preview document IS the export document — the same iframe is what gets printed (see
+     watchPrintDismissal's comment), so it is built with the real filename already in its <title>
+     and there is nothing left to compute when Export is pressed. */
+  let pendingPdfName = null;
   function renderPdfPreview(){
     const groups = getSelectedGroupRange(getExportSceneGroups());
-    pdfPreviewFrame.srcdoc = buildCurrentExportHtml(groups, 'Storyboard');
+    const neutral = buildCurrentExportHtml(groups, 'Storyboard');
+    pendingPdfName = null;
+    pdfPreviewFrame.srcdoc = neutral;
+    nextPdfDocTitle(neutral).then(rec => {
+      /* Guard against a slower lookup landing after the person changed layout or scene range —
+         only the most recent request may claim the preview. */
+      const current = buildCurrentExportHtml(getSelectedGroupRange(getExportSceneGroups()), 'Storyboard');
+      if(current !== neutral) return;
+      pendingPdfName = rec;
+      pdfPreviewFrame.srcdoc = buildCurrentExportHtml(getSelectedGroupRange(getExportSceneGroups()), rec.name);
+    });
   }
   function buildCurrentExportHtml(groups, docTitle){
     return pdfExportLayout === 'vertical'
@@ -5664,67 +5758,55 @@
     }
     return h.toString(36) + ':' + html.length;
   }
+  /* Works out what THIS export would be called, without recording it. Called while building the
+     preview, so the finished name is already baked into the document by the time Export is pressed
+     and the click handler has nothing to await. commitPdfDocTitle() records it afterwards. */
   async function nextPdfDocTitle(html){
     const pid = currentProjectId;
     const base = sanitizePdfFilenameBase(state.title);
     const sig = hashExportHtml(html);
     let rec = null;
     try{ const raw = await storGet('pdf-export-name:' + pid); if(raw) rec = JSON.parse(raw); }catch(e){}
-    if(rec && rec.base === base && rec.sig === sig && rec.name) return rec.name;
+    if(rec && rec.base === base && rec.sig === sig && rec.name) return { pid, base, sig, seq: rec.seq, name: rec.name };
     const seq = (rec && rec.base === base && typeof rec.seq === 'number' ? rec.seq : 0) + 1;
-    const name = seq === 1 ? base : base + '_' + seq;
-    storSet('pdf-export-name:' + pid, JSON.stringify({ base, seq, sig, name }));
-    return name;
+    return { pid, base, sig, seq, name: seq === 1 ? base : base + '_' + seq };
+  }
+  function commitPdfDocTitle(rec){
+    if(!rec) return;
+    storSet('pdf-export-name:' + rec.pid, JSON.stringify({ base: rec.base, seq: rec.seq, sig: rec.sig, name: rec.name }));
   }
 
-  /* ---- Printing without leaving the app ----
-     The export used to window.open() a blank tab and write the document into it. In an installed
-     standalone PWA there are no tabs and no browser chrome, so that document simply replaced the
-     app on screen — and backing out of the iOS print sheet left a bare, button-less page with no
-     way back short of force-quitting. Printing from a hidden same-page iframe keeps the app itself
-     on screen the whole time: whatever the print sheet does, we're still here when it closes. */
-  let printFrameEl = null;
-  function printHtmlDocument(html, onDismissed){
-    if(printFrameEl && printFrameEl.parentNode) printFrameEl.parentNode.removeChild(printFrameEl);
-    const frame = document.createElement('iframe');
-    frame.setAttribute('aria-hidden', 'true');
-    /* Off-screen rather than display:none or 0x0 — a print iframe needs a real layout box, or
-       there is nothing for the print engine to paginate. */
-    frame.style.cssText = 'position:fixed; left:-10000px; top:0; width:1024px; height:1400px; border:0; opacity:0; pointer-events:none;';
-    document.body.appendChild(frame);
-    printFrameEl = frame;
-    const doc = frame.contentDocument;
-    doc.open();
-    doc.write(html);
-    doc.close();
-    let settled = false;
+  /* ---- Printing without leaving the app, and without tripping the auto-print block ----
+     Two constraints shape this.
+     (1) The export must not navigate away: in an installed standalone PWA there are no tabs, so a
+     window.open()'d print document simply replaced the app and backing out of the print sheet left
+     a bare, button-less page. So printing happens from an in-page iframe.
+     (2) print() has to be called SYNCHRONOUSLY inside the click handler. Safari treats a print()
+     that happens after an await or a setTimeout as unrequested and shows "This website has been
+     blocked from automatically printing", making the person tap Allow every single time. The
+     earlier version did both — awaited the filename, then printed from inside a 400ms timeout —
+     which is exactly why that prompt appeared.
+     The iframe we print is the preview iframe itself. It already holds the finished export
+     document, built and laid out while the person was looking at it, so at click time there is
+     nothing left to prepare and nothing to wait for. It also guarantees that what prints is
+     literally what was previewed, not a second copy that could drift. */
+  let pdfPrintSettled = null;
+  function watchPrintDismissal(frameWin, onDismissed){
+    let done = false;
     const settle = () => {
-      if(settled) return;
-      settled = true;
-      setTimeout(() => {
-        if(frame.parentNode) frame.parentNode.removeChild(frame);
-        if(printFrameEl === frame) printFrameEl = null;
-      }, 250);
+      if(done) return;
+      done = true;
+      window.removeEventListener('focus', onFocus);
       if(onDismissed) onDismissed();
     };
-    try{ frame.contentWindow.addEventListener('afterprint', settle); }catch(e){}
-    /* A freshly-written document needs a beat for images (data-URIs, so no network wait, but still
-       an async decode) and layout to settle before print() captures accurate page content. */
-    setTimeout(() => {
-      try{
-        frame.contentWindow.focus();
-        frame.contentWindow.print();
-      }catch(e){
-        showToast('Could not open the print sheet');
-        settle();
-        return;
-      }
-      /* Safety net: if afterprint never arrives (it isn't reliably fired everywhere), fall back to
-         the window regaining focus, which is what happens once the print sheet is dismissed either
-         way. Whichever lands first wins; settle() is idempotent. */
-      const onFocus = () => { window.removeEventListener('focus', onFocus); settle(); };
-      setTimeout(() => window.addEventListener('focus', onFocus), 600);
-    }, 400);
+    const onFocus = () => settle();
+    try{ frameWin.addEventListener('afterprint', settle); }catch(e){}
+    window.addEventListener('afterprint', settle);
+    /* Safety net: afterprint isn't fired reliably everywhere, but the app window regains focus
+       once the print sheet closes either way. Armed late so the print sheet's own opening can't
+       trip it immediately. Whichever lands first wins; settle() is idempotent. */
+    setTimeout(() => window.addEventListener('focus', onFocus), 800);
+    return settle;
   }
 
   function openPdfExport(){
@@ -5774,12 +5856,31 @@
     if(parseInt(pdfSceneToSelect.value, 10) < parseInt(pdfSceneFromSelect.value, 10)) pdfSceneFromSelect.value = pdfSceneToSelect.value;
     renderPdfPreview();
   });
-  pdfExportGoBtn.addEventListener('click', async () => {
-    const groups = getSelectedGroupRange(getExportSceneGroups());
-    /* Named after the content, so the signature is taken from the document as it will actually be
-       printed — title included, which is harmless since the title is derived from everything else. */
-    const docTitle = await nextPdfDocTitle(buildCurrentExportHtml(groups, 'Storyboard'));
-    printHtmlDocument(buildCurrentExportHtml(groups, docTitle), finishPdfExport);
+  /* Deliberately NOT async, and with no timers before print(): see watchPrintDismissal. Anything
+     that defers the call past the click's own task turns it into an "automatic" print in Safari's
+     eyes and raises the blocked-from-printing prompt. */
+  pdfExportGoBtn.addEventListener('click', () => {
+    const win = pdfPreviewFrame.contentWindow;
+    if(!win){ showToast('The preview is still loading'); return; }
+    const rec = pendingPdfName;
+    /* iOS names the saved PDF after the document that owns the print job. For an iframe print that
+       is the host page, not the iframe — which is why setting only the iframe's <title> left every
+       export called "Novel Boards" and colliding in Files. Set both, and put the app's own title
+       back once the sheet closes. */
+    const appTitle = document.title;
+    if(rec) document.title = rec.name;
+    const settle = watchPrintDismissal(win, () => {
+      document.title = appTitle;
+      commitPdfDocTitle(rec);
+      finishPdfExport();
+    });
+    try{
+      win.focus();
+      win.print();
+    }catch(e){
+      showToast('Could not open the print sheet');
+      settle();
+    }
   });
 
   /* ===================== Shared canvas drawing helpers ===================== */
