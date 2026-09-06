@@ -590,11 +590,13 @@
     overflow-y:auto; -webkit-overflow-scrolling:touch; outline:none;
   }
   .notes-lines.expanded .note-line{ height:45px; line-height:45px; font-size:23.25px; padding:0 22px; }
-  .notes-lines.expanded .notes-lines-filler{
-    min-height:45px;
-    background-image: linear-gradient(var(--paper) 43.5px, var(--paper-line) 43.5px, var(--paper-line) 45px, var(--paper) 45px);
-    background-size:100% 45px;
-  }
+  /* Hidden in the expand overlay so the ruled lines you can see are exactly the lines you can
+     actually type on — no decorative ruled space below the last real line to type into by
+     mistake. (It stays visible on the compact card, where it's purely a lined-paper look and
+     there's no caret to misplace into it.) The filler also lives *inside* notesExpandLines,
+     which is itself the contentEditable host here, so it would otherwise inherit editability
+     and accept a caret — hence contenteditable:false on it too, as defense in depth. */
+  .notes-lines.expanded .notes-lines-filler{ display:none; }
 
   /* ---------- Notes expand overlay (long-press) ---------- */
   .notes-expand-backdrop{ position:fixed; inset:0; background:rgba(0,0,0,.5); opacity:0; pointer-events:none; transition:opacity .28s ease; z-index:150; }
@@ -603,9 +605,14 @@
     position:fixed; background:var(--paper); z-index:151; border-radius:18px; overflow:hidden;
     display:flex; flex-direction:column; box-shadow:0 30px 70px rgba(0,0,0,.5);
     opacity:0; pointer-events:none;
-    transition:opacity .22s ease, top .32s cubic-bezier(.32,.72,0,1), left .32s cubic-bezier(.32,.72,0,1), width .32s cubic-bezier(.32,.72,0,1), height .32s cubic-bezier(.32,.72,0,1);
+    /* visibility (not just opacity + pointer-events) so the closed panel is genuinely out of
+       hit-testing — see setEditMode's comment on the center-screen scroll dead zone. Its own
+       transition is a 0s step delayed until the close animation finishes, so that animation
+       still plays in full before the panel becomes unhittable. */
+    visibility:hidden;
+    transition:opacity .22s ease, top .32s cubic-bezier(.32,.72,0,1), left .32s cubic-bezier(.32,.72,0,1), width .32s cubic-bezier(.32,.72,0,1), height .32s cubic-bezier(.32,.72,0,1), visibility 0s linear .32s;
   }
-  .notes-expand-panel.show{ opacity:1; pointer-events:auto; }
+  .notes-expand-panel.show{ opacity:1; pointer-events:auto; visibility:visible; transition-delay:0s; }
   .notes-expand-header{
     flex:0 0 auto; display:flex; align-items:center; justify-content:space-between;
     padding:12px 16px; border-bottom:1px solid var(--paper-line); background:var(--paper);
@@ -636,10 +643,6 @@
     font-size:14px; font-weight:700; display:flex; align-items:center; justify-content:center;
   }
   .notes-style-btn.active{ background:var(--accent); color:#fff; }
-  .notes-delete-all-btn{
-    flex:0 0 auto; padding:7px 13px; border-radius:14px; background:var(--danger); color:#fff;
-    font-size:12px; font-weight:700; white-space:nowrap;
-  }
   .note-line[data-placeholder]:empty::before{ content:attr(data-placeholder); color:var(--ink-dim); pointer-events:none; }
 
   /* ---- PDF export overlay ---- */
@@ -1324,6 +1327,13 @@
   const saveTimers = {};
 
   function uid(prefix){ return (prefix||'c') + Math.random().toString(36).slice(2, 9); }
+
+  /* Structural deep copy, used throughout for snapshotting cuts / editor state / transforms before
+     mutating them. Round-tripping through JSON is the whole implementation and always was — this
+     is only here so the intent reads at the call sites instead of the mechanism. Same limits as
+     before: plain JSON-representable data only (no Dates, Maps, functions or cycles), which is
+     exactly what every caller passes. */
+  function deepClone(value){ return JSON.parse(JSON.stringify(value)); }
 
   /* Default starter content for a brand-new project: 10 blank shots in a single scene. Shared
      by ensureProjectLoaded (an existing project whose storage turned out empty) and
@@ -2208,7 +2218,14 @@
       if(notesExpandLines.contains(el)) return;
       el.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true';
     });
-    notesExpandLines.contentEditable = (appMode === 'trash' || !editMode || selectMode) ? 'false' : 'true';
+    /* Deliberately NOT touched here — openNotesExpand sets it when the overlay actually opens,
+       and closeNotesExpand clears it again. Setting it from here made the closed overlay
+       contenteditable for the entire time edit mode was on; the closed panel still occupies its
+       last centered rect (repositionNotesExpandPanel runs on resize regardless of open state),
+       and although it's invisible via opacity:0 + pointer-events:none, iOS WebKit routes text-
+       interaction gestures to contenteditable regions in a way that pointer-events:none doesn't
+       fully suppress — leaving a dead zone for scrolling in the middle of the screen, exactly the
+       size of the expand panel, in edit mode only. */
     updateFilmstripScrollbar();
   }
   editToggleBtn.addEventListener('click', () => setEditMode(!editMode));
@@ -3019,6 +3036,8 @@
        gets it too, instead of it only existing on first build and vanishing on any resync. */
     const filler = document.createElement('div');
     filler.className = 'notes-lines-filler';
+    filler.contentEditable = 'false';
+    filler.setAttribute('aria-hidden', 'true');
     wrap.appendChild(filler);
   }
 
@@ -3049,7 +3068,7 @@
     div.innerHTML = html || '';
     if(index === 0 && !html) div.setAttribute('data-placeholder', 'Blocking, camera moves, notes…');
     if(!isExpand){
-      div.addEventListener('input', () => onLineInput(cut, wrap, div));
+      div.addEventListener('input', e => onLineInput(cut, wrap, div, { allowTrim: !!(e.inputType && e.inputType.startsWith('delete')) }));
       div.addEventListener('keydown', e => onLineKeydown(e, cut, wrap, div));
     }
     return div;
@@ -3088,14 +3107,29 @@
   function syncNotesFromLines(cut, wrap){
     const lines = Array.from(wrap.querySelectorAll('.note-line'));
     cut.notesHtml = lines.map(l => '<div>' + (l.innerHTML || '<br>') + '</div>').join('');
-    cut.notes = lines.map(l => stripTagsToText(l.innerHTML)).join('\n');
+    /* .textContent directly, rather than stripTagsToText(l.innerHTML) — this runs on every
+       keystroke, and the latter builds a throwaway element and re-parses the HTML for each of
+       the ~10 lines just to recover text the live DOM node already holds. */
+    cut.notes = lines.map(l => l.textContent).join('\n');
     debouncedSaveCut(cut.id);
   }
 
-  function onLineInput(cut, wrap, div){
+  function onLineInput(cut, wrap, div, opts){
     if(!editMode || appMode === 'trash') return;
-    checkLineOverflow(cut, wrap, div);
-    trimTrailingEmptyLines(wrap);
+    /* checkLineOverflow's first act is a getBoundingClientRect + getComputedStyle +
+       caretRangeFromPoint hit-test — real layout work, and this runs on every single keystroke.
+       scrollWidth vs clientWidth answers "is there anything to wrap at all" from already-computed
+       layout, so the expensive path only runs on the rare keystroke that actually overflows. */
+    if(div.scrollWidth > div.clientWidth + 1) checkLineOverflow(cut, wrap, div);
+    /* Deliberately NOT run for ordinary typing: it removes DOM nodes, and removing a node at or
+       after the caret forces WebKit to recover the selection itself, which can leave a range
+       spanning several lines (the "typing suddenly selects/replaces multiple lines" bug). Typing
+       can't create trailing empty lines anyway — only deletions and merges can, and those paths
+       call it explicitly. */
+    if(opts && opts.allowTrim){
+      ensureMinLines(cut, wrap);
+      trimTrailingEmptyLines(wrap);
+    }
     syncNotesFromLines(cut, wrap);
     if(wrap === notesExpandLines && expandedCutId === cut.id){
       clearTimeout(notesHistoryTypingTimer);
@@ -3204,8 +3238,13 @@
     const lines = Array.from(wrap.querySelectorAll('.note-line'));
     let i = lines.length - 1;
     let emptyCount = 0;
-    while(i >= 0 && stripTagsToText(lines[i].innerHTML).trim() === ''){ emptyCount++; i--; }
+    while(i >= 0 && lines[i].textContent.trim() === ''){ emptyCount++; i--; }
     const excess = emptyCount - 1;
+    /* Never remove the line the caret is actually sitting in. document.activeElement alone is no
+       longer sufficient: in the expand overlay only the container is focusable, so activeElement
+       is that container rather than the specific line — resolving it from the live selection
+       covers both that case and the card view (where the line itself is the focused element). */
+    const caretLine = currentLineFromSelection(wrap);
     if(excess > 0 && lines.length - excess >= MIN_LINES){
       /* wrap's actual last child is now always .notes-lines-filler (the blank ruled-space filler
          appended in buildLinesInto), not a .note-line — removing wrap.lastElementChild directly
@@ -3213,9 +3252,25 @@
          elements by reference instead, from the already-collected lines array, sidesteps that. */
       for(let k = 0; k < excess; k++){
         const last = lines[lines.length - 1 - k];
-        if(!last || document.activeElement === last) break;
+        if(!last || document.activeElement === last || last === caretLine) break;
         wrap.removeChild(last);
       }
+    }
+  }
+
+  /* A native select-all + delete inside a contenteditable removes the child line divs entirely,
+     not just their text — collapsing the note to a single line and losing the ruled page.
+     trimTrailingEmptyLines only ever removes lines, so it can't undo that; this pads back up to
+     MIN_LINES using the same builder the initial build uses. Only ever adds, never removes, so
+     it's safe to call from any post-edit path. */
+  function ensureMinLines(cut, wrap){
+    let lines = wrap.querySelectorAll('.note-line');
+    if(lines.length >= MIN_LINES) return;
+    const filler = wrap.querySelector('.notes-lines-filler');
+    for(let i = lines.length; i < MIN_LINES; i++){
+      const div = buildLineDiv(cut, wrap, i, '');
+      if(filler) wrap.insertBefore(div, filler);
+      else wrap.appendChild(div);
     }
   }
 
@@ -3487,6 +3542,9 @@
     }
     notesExpandPanel.classList.remove('show');
     notesExpandBackdrop.classList.remove('show');
+    /* See setEditMode's comment: the closed overlay must never remain contenteditable, or iOS
+       routes text-interaction gestures to it and it eats touches in the middle of the screen. */
+    notesExpandLines.contentEditable = 'false';
     expandedCutId = null;
     clearTimeout(notesHistoryTypingTimer);
     notesHistory = [];
@@ -3503,6 +3561,19 @@
      in, so these just need that selection to survive the button press — pointerdown/preventDefault
      on the buttons stops the browser from stealing focus (and clearing the selection) before the
      click handler gets a chance to run. */
+  let formatButtonsSyncQueued = false;
+  /* queryCommandState/queryCommandValue each force WebKit to inspect the live selection's
+     computed style — fine occasionally, but this fires on every keyup while typing. Coalescing
+     to at most one run per animation frame keeps the toolbar just as visually current (a frame
+     is well under perceptible latency) while taking it off the per-keystroke path. */
+  function requestFormatButtonsSync(){
+    if(formatButtonsSyncQueued) return;
+    formatButtonsSyncQueued = true;
+    requestAnimationFrame(() => {
+      formatButtonsSyncQueued = false;
+      syncFormatButtonsUI();
+    });
+  }
   function syncFormatButtonsUI(){
     document.querySelectorAll('.notes-style-btn').forEach(btn => {
       let active = false;
@@ -3547,21 +3618,21 @@
       syncExpandedNotesAfterFormat();
     });
   });
-  notesExpandLines.addEventListener('keyup', syncFormatButtonsUI);
-  notesExpandLines.addEventListener('pointerup', () => setTimeout(syncFormatButtonsUI, 0));
+  notesExpandLines.addEventListener('keyup', requestFormatButtonsSync);
+  notesExpandLines.addEventListener('pointerup', () => setTimeout(requestFormatButtonsSync, 0));
 
   /* See buildLineDiv's block comment: notesExpandLines itself is the sole editing host for the
      expand overlay, so input/keydown events land on the container, not on whichever .note-line
      the caret happens to be in. Resolve the actual line from the live selection and hand off to
      the exact same onLineInput/onLineKeydown the card view calls per-line — every downstream
      behavior (auto-wrap, growing blank lines, undo/redo checkpoints) is identical either way. */
-  notesExpandLines.addEventListener('input', () => {
+  notesExpandLines.addEventListener('input', e => {
     if(!editMode || appMode === 'trash' || !expandedCutId) return;
     const cut = state.cuts[expandedCutId];
     if(!cut) return;
     const lines = notesExpandLines.querySelectorAll('.note-line');
     const div = currentLineFromSelection(notesExpandLines) || lines[lines.length - 1];
-    if(div) onLineInput(cut, notesExpandLines, div);
+    if(div) onLineInput(cut, notesExpandLines, div, { allowTrim: !!(e.inputType && e.inputType.startsWith('delete')) });
   });
   notesExpandLines.addEventListener('keydown', e => {
     if(!editMode || appMode === 'trash' || !expandedCutId) return;
@@ -3914,7 +3985,7 @@
      might need to roll back (scene, notes, notesHtml, trashedScene/trashedShotNumber/trashedAt)
      is always *reassigned wholesale* elsewhere in the code, never mutated in place inside a
      nested array/object — so a one-level-deep shallow copy per cut is enough to correctly
-     freeze a snapshot; it doesn't need JSON.parse(JSON.stringify(...)) walking into (and
+     freeze a snapshot; it doesn't need deepClone(...) walking into (and
      duplicating) every shot's image dataURL / editorStrokes / editorActions. That deep clone
      was happening on *every single* structural edit (it's what pushUndoSnapshot did under the
      hood), so its cost scaled with the *entire project's* image data, not just what changed —
@@ -5181,8 +5252,8 @@
     return {
       app: 'ipad-storyboard',
       exportedAt: new Date().toISOString(),
-      projects: JSON.parse(JSON.stringify(projects)),
-      projectData: JSON.parse(JSON.stringify(projectDataCache))
+      projects: deepClone(projects),
+      projectData: deepClone(projectDataCache)
     };
   }
 
@@ -5340,7 +5411,32 @@
      (an iframe, so it renders pixel-for-pixel identical to what actually prints) and the final
      export (the exact same document opened in a new tab, then window.print() — the person saves
      it as a PDF from Safari's own print sheet). */
-  const HORIZONTAL_MAX_NOTE_LINES = 3;
+  /* ---- Print geometry ----
+     Both layouts size their frame from ONE pair of numbers so the shot's real aspect ratio
+     (1332:720, the app's own canvas) is preserved exactly rather than re-derived per layout.
+     Vertical: the frame used to be 330x179 and only 4 rows cleared an A4 page. A4 portrait at a
+     14mm margin leaves 269mm ≈ 1016px of printable height; one row costs frameH + 16px padding +
+     6px border + 7px margin, and a scene header costs about 46px, so 5 rows need a frame no
+     taller than about (1016 - 46 - 5*29) / 5 ≈ 165px. 285px wide lands at 154.6px tall, which
+     puts a full page of 5 at roughly 964px with ~50px of slack for rounding — deliberately not
+     sized right up to the limit, since a hairline of overflow costs a whole extra page. */
+  const PDF_FRAME_RATIO_W = 1332, PDF_FRAME_RATIO_H = 720;
+  const VERTICAL_FRAME_W = 285;
+  const VERTICAL_FRAME_H = Math.round(VERTICAL_FRAME_W * PDF_FRAME_RATIO_H / PDF_FRAME_RATIO_W * 100) / 100;
+  /* Notes keep their existing 11px/1.6 type exactly as-is; only the capacity changes, because
+     the column is now bounded by the (smaller) frame's height instead of growing without limit.
+     One ruled line costs 11 * 1.6 + 2px padding + 1px rule = 20.6px, so 7 lines (146.2px) is the
+     most that fits inside 154.6px. */
+  const VERTICAL_NOTE_LINE_H = 20.6;
+  const VERTICAL_MAX_NOTE_LINES = Math.floor((VERTICAL_FRAME_H - 2) / VERTICAL_NOTE_LINE_H);
+  /* Horizontal: 4 x 2 = 8 panels per landscape page. The notes strip is then sized to consume the
+     vertical room the 4-across grid leaves over — two rows of panel at the frame's own aspect
+     ratio only reach about two thirds of the way down the sheet, so rather than leave the bottom
+     of the page empty the strip takes the rest as extra ruled lines. 9 lines at an 18px row
+     (11.5px type, nudged up from 10.5) lands just inside that spare room with slack for rounding. */
+  const HORIZONTAL_MAX_NOTE_LINES = 9;
+  const HORIZONTAL_PANELS_PER_ROW = 4;
+  const HORIZONTAL_PANEL_ROWS = 2;
 
   /* Plain-text note lines for export, trimmed of trailing blanks — deliberately NOT
      getRichLinesForCut/getNotesPlainText (Session 1's helper), which either pad to MIN_LINES
@@ -5381,13 +5477,22 @@
 
   const PDF_BASE_CSS =
     '*{box-sizing:border-box;} body{font-family:Helvetica,Arial,sans-serif;margin:0;padding:0;color:#161616;background:#fff;}' +
-    '.note-line{ white-space:pre-wrap; word-break:break-word; }';
+    '.note-line{ white-space:pre-wrap; word-break:break-word; }' +
+    /* Shot-number badge overlaid on a frame — identical in both layouts apart from how far
+       it is inset, which each layout sets itself below. */
+    '.frame-label{ position:absolute; z-index:2; background:rgba(0,0,0,.6); color:#fff; font-size:9.6px; font-weight:800; letter-spacing:.03em; padding:2px 5px; border-radius:3px; }';
 
-  function buildVerticalExportHtml(groups){
+  function buildVerticalExportHtml(groups, docTitle){
     const parts = [];
     groups.forEach(g => {
       parts.push('<div class="scene-header">' + escapeHtml(g.sceneText) + '</div>');
       g.shots.forEach(s => {
+        /* The notes column is now a fixed-height area (it matches the frame's height), so it
+           holds exactly VERTICAL_MAX_NOTE_LINES ruled lines: any further lines are dropped, and a
+           shorter note is padded out with blank ruled slots so every row reads as the same piece
+           of ruled paper regardless of how much was written. */
+        const lines = s.noteLines.slice(0, VERTICAL_MAX_NOTE_LINES);
+        while(lines.length < VERTICAL_MAX_NOTE_LINES) lines.push('');
         parts.push(
           '<div class="shot-row">' +
             '<div class="frame-col">' +
@@ -5397,7 +5502,7 @@
               '</div>' +
             '</div>' +
             '<div class="notes-col">' +
-              (s.noteLines.length ? s.noteLines.map(l => '<div class="note-line">' + escapeHtml(l) + '</div>').join('') : '<div class="note-line note-line-empty">&nbsp;</div>') +
+              lines.map(l => '<div class="note-line">' + escapeHtml(l) + '</div>').join('') +
             '</div>' +
           '</div>'
         );
@@ -5411,20 +5516,22 @@
       /* Frame enlarged 50% in both dimensions per Kevin's request: 220x119 -> 330x179. Scene/shot
          labels moved from separate rows outside the frame to small overlay badges on the frame
          itself (top-left/top-right), which is why frame-box needs position:relative now. */
-      '.frame-col{ flex:0 0 auto; width:330px; text-align:left; }' +
-      '.frame-box{ position:relative; width:330px; height:179px; border:1px solid #111; overflow:hidden; background:#eee; display:flex; align-items:center; justify-content:center; }' +
+      '.frame-col{ flex:0 0 auto; width:' + VERTICAL_FRAME_W + 'px; text-align:left; }' +
+      '.frame-box{ position:relative; width:' + VERTICAL_FRAME_W + 'px; height:' + VERTICAL_FRAME_H + 'px; border:1px solid #111; overflow:hidden; background:#eee; display:flex; align-items:center; justify-content:center; }' +
       '.frame-box img{ width:100%; height:100%; object-fit:contain; }' +
-      '.frame-label{ position:absolute; top:4px; left:4px; z-index:2; background:rgba(0,0,0,.6); color:#fff; font-size:9.6px; font-weight:800; letter-spacing:.03em; padding:2px 5px; border-radius:3px; }' +
-      '.notes-col{ flex:1 1 auto; min-width:0; border-left:1px solid #ccc; padding-left:12px; padding-top:2px; }' +
+      '.frame-label{ top:4px; left:4px; }' +
+      /* Fixed height, matching the frame beside it: this is what makes a row's height fully
+         predictable and therefore what makes "5 to a page" hold no matter how long a note is. */
+      '.notes-col{ flex:1 1 auto; min-width:0; height:' + VERTICAL_FRAME_H + 'px; overflow:hidden; border-left:1px solid #ccc; padding-left:12px; padding-top:2px; }' +
       '.note-line{ font-size:11px; line-height:1.6; border-bottom:1px solid #ddd; padding:1px 0; min-height:16px; }' +
       '@media screen{ body{ background:#6b6b6e; padding:20px 0; } .doc-inner{ width:794px; margin:0 auto; background:#fff; padding:14mm; box-shadow:0 6px 20px rgba(0,0,0,.35); zoom:.58; } }' +
       '@media print{ .doc-inner{ width:auto; margin:0; padding:0; box-shadow:none; background:none; } }';
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Storyboard</title><style>' + PDF_BASE_CSS + css + '</style></head>' +
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(docTitle || 'Storyboard') + '</title><style>' + PDF_BASE_CSS + css + '</style></head>' +
       '<body><div class="doc-inner">' + parts.join('') + '</div></body></html>';
   }
 
-  function buildHorizontalExportHtml(groups){
-    const PANELS_PER_PAGE = 6;
+  function buildHorizontalExportHtml(groups, docTitle){
+    const PANELS_PER_PAGE = HORIZONTAL_PANELS_PER_ROW * HORIZONTAL_PANEL_ROWS;
     const pages = [];
     let current = [];
     let currentSceneText = '';
@@ -5456,27 +5563,45 @@
           '<div class="panel-notes">' + p.noteLines.map(l => '<div class="note-line">' + escapeHtml(l) + '</div>').join('') + '</div>' +
         '</div>'
       ).join('');
-      return '<div class="page"><div class="page-header">' + escapeHtml(pg.sceneText) + '</div><div class="panel-grid">' + panelsHtml + '</div></div>';
+      return '<div class="page"><div class="page-canvas"><div class="page-header">' + escapeHtml(pg.sceneText) + '</div><div class="panel-grid">' + panelsHtml + '</div></div></div>';
     }).join('');
 
+    /* Landscape pages, the long way round.
+       @page{ size:A4 landscape } is simply ignored by Safari/WebKit (the size descriptor's
+       orientation values have never been implemented there), which is why a 297mm-wide page was
+       being laid onto a 210mm-wide sheet and the right-hand column was getting cut off. There is
+       no CSS switch that fixes this — the only reliable way to fill a landscape area on a sheet
+       Safari insists on treating as portrait is to lay the content out at landscape dimensions
+       and rotate it 90° onto the portrait page at print time. That's what .page-canvas is for:
+       a real 297x210mm box, upright on screen (so the preview reads normally), rotated into
+       place only under @media print. The printed/saved page is then A4 portrait carrying
+       landscape content — i.e. exactly what any printer does when you ask it for landscape. */
     const css =
-      '@page{ size:A4 landscape; margin:0; }' +
-      '.page{ width:297mm; height:210mm; padding:10mm; page-break-after:always; }' +
+      '@page{ size:A4 portrait; margin:0; }' +
+      '.page{ page-break-after:always; }' +
       '.page:last-child{ page-break-after:auto; }' +
-      '.page-header{ font-weight:800; font-size:13px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:6mm; padding-bottom:2mm; border-bottom:1.5px solid #111; }' +
-      '.panel-grid{ display:grid; grid-template-columns:repeat(3,1fr); grid-auto-rows:auto; gap:8mm; width:100%; justify-content:start; align-content:start; }' +
-      /* Near-square rectangle (slightly wider than tall), not a perfect square — matches the
-         reference template Kevin shared, which measures roughly 9:8 per panel. */
-      '.panel{ aspect-ratio:9/8; border:2px solid #111; display:flex; flex-direction:column; overflow:hidden; }' +
-      /* Divider line between image and notes areas, ~73/27 split — matches the reference. */
-      '.panel-frame{ position:relative; flex:73 1 0; min-height:0; background:#eee; display:flex; align-items:center; justify-content:center; }' +
+      '.page-canvas{ width:297mm; height:210mm; padding:10mm; overflow:hidden; }' +
+      '.page-header{ font-weight:800; font-size:13px; letter-spacing:.05em; text-transform:uppercase; margin-bottom:5mm; padding-bottom:2mm; border-bottom:1.5px solid #111; }' +
+      '.panel-grid{ display:grid; grid-template-columns:repeat(' + HORIZONTAL_PANELS_PER_ROW + ',1fr); grid-auto-rows:auto; gap:7mm; width:100%; justify-content:start; align-content:start; }' +
+      /* The panel no longer carries a fixed aspect ratio of its own. Its image area does — set to
+         the shot's true 1332:720 — and the notes strip below it is a fixed height sized to hold
+         exactly HORIZONTAL_MAX_NOTE_LINES ruled lines, so the panel is simply as tall as those
+         two add up to. That's what keeps the frame's aspect ratio exact while letting the notes
+         strip grow to 5 lines without squeezing the image. */
+      '.panel{ border:2px solid #111; display:flex; flex-direction:column; overflow:hidden; }' +
+      '.panel-frame{ position:relative; width:100%; aspect-ratio:' + PDF_FRAME_RATIO_W + '/' + PDF_FRAME_RATIO_H + '; flex:0 0 auto; background:#eee; display:flex; align-items:center; justify-content:center; }' +
       '.panel-frame img{ width:100%; height:100%; object-fit:contain; }' +
-      '.frame-label{ position:absolute; top:3px; left:3px; z-index:2; background:rgba(0,0,0,.6); color:#fff; font-size:9.6px; font-weight:800; letter-spacing:.03em; padding:2px 5px; border-radius:3px; }' +
-      '.panel-notes{ flex:27 1 0; min-height:0; padding:2px 7px; border-top:1.5px solid #111; display:flex; flex-direction:column; justify-content:center; gap:2px; }' +
-      '.panel-notes .note-line{ font-size:10.5px; line-height:1.35; border-bottom:1px solid #ccc; padding:1px 0; min-height:13px; }' +
-      '@media screen{ body{ background:#6b6b6e; padding:20px 0; } .page{ margin:0 auto 20px; background:#fff; box-shadow:0 6px 20px rgba(0,0,0,.35); zoom:.42; } }' +
-      '@media print{ .page{ margin:0; box-shadow:none; } }';
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>Storyboard</title><style>' + PDF_BASE_CSS + css + '</style></head>' +
+      '.frame-label{ top:3px; left:3px; }' +
+      '.panel-notes{ flex:0 0 auto; padding:3px 7px; border-top:1.5px solid #111; }' +
+      /* One ruled row per line, fixed height and no wrapping. The base stylesheet lets note text
+         wrap, which in a column this narrow turned a "5 line" strip into 5 double-height rows and
+         made panel heights uneven — Horizontal is the deliberately-truncating layout, so a line
+         too long for the strip is simply clipped at the edge instead. */
+      '.panel-notes .note-line{ font-size:11.5px; line-height:17px; height:17px; padding:0; border-bottom:1px solid #ccc; white-space:nowrap; overflow:hidden; }' +
+      '@media screen{ body{ background:#6b6b6e; padding:20px 0; } .page{ width:297mm; margin:0 auto 20px; background:#fff; box-shadow:0 6px 20px rgba(0,0,0,.35); zoom:.42; } }' +
+      '@media print{ .page{ position:relative; width:210mm; height:297mm; margin:0; overflow:hidden; box-shadow:none; }' +
+      ' .page-canvas{ position:absolute; top:0; left:0; transform-origin:0 0; transform:translateX(210mm) rotate(90deg); } }';
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escapeHtml(docTitle || 'Storyboard') + '</title><style>' + PDF_BASE_CSS + css + '</style></head>' +
       '<body>' + pagesHtml + '</body></html>';
   }
 
@@ -5508,9 +5633,98 @@
   }
   function renderPdfPreview(){
     const groups = getSelectedGroupRange(getExportSceneGroups());
-    pdfPreviewFrame.srcdoc = pdfExportLayout === 'vertical'
-      ? buildVerticalExportHtml(groups)
-      : buildHorizontalExportHtml(groups);
+    pdfPreviewFrame.srcdoc = buildCurrentExportHtml(groups, 'Storyboard');
+  }
+  function buildCurrentExportHtml(groups, docTitle){
+    return pdfExportLayout === 'vertical'
+      ? buildVerticalExportHtml(groups, docTitle)
+      : buildHorizontalExportHtml(groups, docTitle);
+  }
+
+  /* ---- Export file naming ----
+     iOS takes the saved PDF's filename straight from the printed document's <title>. That was the
+     constant string "Storyboard" for every export, so the second and every later export collided
+     with the first in Files and raised a replace/keep-both prompt even though the contents were
+     completely different. Now the name carries the project title and an incrementing suffix, kept
+     per project in storage so it survives an app restart (a session-only counter would restart at
+     1 and collide all over again). The signature check means a genuinely identical re-export — same
+     layout, same scene range, same content — deliberately reuses its previous name rather than
+     burning a new number on a duplicate file. */
+  function sanitizePdfFilenameBase(title){
+    const cleaned = String(title || '').replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+    return (cleaned || 'Storyboard').slice(0, 60);
+  }
+  function hashExportHtml(html){
+    /* Cheap non-cryptographic signature (FNV-1a) — this only ever has to answer "is this byte-for
+       byte the document I exported last time", never anything security-sensitive. */
+    let h = 0x811c9dc5;
+    for(let i = 0; i < html.length; i++){
+      h ^= html.charCodeAt(i);
+      h = (h + ((h << 1) + (h << 4) + (h << 7) + (h << 8) + (h << 24))) >>> 0;
+    }
+    return h.toString(36) + ':' + html.length;
+  }
+  async function nextPdfDocTitle(html){
+    const pid = currentProjectId;
+    const base = sanitizePdfFilenameBase(state.title);
+    const sig = hashExportHtml(html);
+    let rec = null;
+    try{ const raw = await storGet('pdf-export-name:' + pid); if(raw) rec = JSON.parse(raw); }catch(e){}
+    if(rec && rec.base === base && rec.sig === sig && rec.name) return rec.name;
+    const seq = (rec && rec.base === base && typeof rec.seq === 'number' ? rec.seq : 0) + 1;
+    const name = seq === 1 ? base : base + '_' + seq;
+    storSet('pdf-export-name:' + pid, JSON.stringify({ base, seq, sig, name }));
+    return name;
+  }
+
+  /* ---- Printing without leaving the app ----
+     The export used to window.open() a blank tab and write the document into it. In an installed
+     standalone PWA there are no tabs and no browser chrome, so that document simply replaced the
+     app on screen — and backing out of the iOS print sheet left a bare, button-less page with no
+     way back short of force-quitting. Printing from a hidden same-page iframe keeps the app itself
+     on screen the whole time: whatever the print sheet does, we're still here when it closes. */
+  let printFrameEl = null;
+  function printHtmlDocument(html, onDismissed){
+    if(printFrameEl && printFrameEl.parentNode) printFrameEl.parentNode.removeChild(printFrameEl);
+    const frame = document.createElement('iframe');
+    frame.setAttribute('aria-hidden', 'true');
+    /* Off-screen rather than display:none or 0x0 — a print iframe needs a real layout box, or
+       there is nothing for the print engine to paginate. */
+    frame.style.cssText = 'position:fixed; left:-10000px; top:0; width:1024px; height:1400px; border:0; opacity:0; pointer-events:none;';
+    document.body.appendChild(frame);
+    printFrameEl = frame;
+    const doc = frame.contentDocument;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    let settled = false;
+    const settle = () => {
+      if(settled) return;
+      settled = true;
+      setTimeout(() => {
+        if(frame.parentNode) frame.parentNode.removeChild(frame);
+        if(printFrameEl === frame) printFrameEl = null;
+      }, 250);
+      if(onDismissed) onDismissed();
+    };
+    try{ frame.contentWindow.addEventListener('afterprint', settle); }catch(e){}
+    /* A freshly-written document needs a beat for images (data-URIs, so no network wait, but still
+       an async decode) and layout to settle before print() captures accurate page content. */
+    setTimeout(() => {
+      try{
+        frame.contentWindow.focus();
+        frame.contentWindow.print();
+      }catch(e){
+        showToast('Could not open the print sheet');
+        settle();
+        return;
+      }
+      /* Safety net: if afterprint never arrives (it isn't reliably fired everywhere), fall back to
+         the window regaining focus, which is what happens once the print sheet is dismissed either
+         way. Whichever lands first wins; settle() is idempotent. */
+      const onFocus = () => { window.removeEventListener('focus', onFocus); settle(); };
+      setTimeout(() => window.addEventListener('focus', onFocus), 600);
+    }, 400);
   }
 
   function openPdfExport(){
@@ -5525,8 +5739,21 @@
     pdfExportBackdrop.classList.remove('show');
     pdfExportPanel.classList.remove('show');
   }
-  document.getElementById('pdfExportCloseBtn').addEventListener('click', closePdfExport);
-  pdfExportBackdrop.addEventListener('click', closePdfExport);
+  /* Backing out of the export (the X, or a tap on the backdrop) returns to where the export was
+     started from — the sidebar, reopened — rather than dumping you on the bare main screen with
+     nothing to show for the trip. Finishing an export does the opposite: see the Export handler. */
+  function cancelPdfExport(){
+    closePdfExport();
+    openSidebar();
+  }
+  /* Export finished — back to the main screen, sidebar closed, nothing left open. */
+  function finishPdfExport(){
+    closePdfExport();
+    closeExportMenu();
+    closeSidebar();
+  }
+  document.getElementById('pdfExportCloseBtn').addEventListener('click', cancelPdfExport);
+  pdfExportBackdrop.addEventListener('click', cancelPdfExport);
   document.querySelectorAll('.pdf-layout-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       if(btn.dataset.layout === pdfExportLayout) return;
@@ -5547,24 +5774,69 @@
     if(parseInt(pdfSceneToSelect.value, 10) < parseInt(pdfSceneFromSelect.value, 10)) pdfSceneFromSelect.value = pdfSceneToSelect.value;
     renderPdfPreview();
   });
-  pdfExportGoBtn.addEventListener('click', () => {
+  pdfExportGoBtn.addEventListener('click', async () => {
     const groups = getSelectedGroupRange(getExportSceneGroups());
-    const html = pdfExportLayout === 'vertical'
-      ? buildVerticalExportHtml(groups)
-      : buildHorizontalExportHtml(groups);
-    const win = window.open('', '_blank');
-    if(!win){ showToast('Could not open the print window — check your pop-up blocker'); return; }
-    win.document.open();
-    win.document.write(html);
-    win.document.close();
-    /* A freshly-written document needs a beat for images (data-URIs, so no network wait needed,
-       but still async decode) and layout to settle before print() captures accurate page content. */
-    setTimeout(() => { try{ win.print(); }catch(e){} }, 400);
+    /* Named after the content, so the signature is taken from the document as it will actually be
+       printed — title included, which is harmless since the title is derived from everything else. */
+    const docTitle = await nextPdfDocTitle(buildCurrentExportHtml(groups, 'Storyboard'));
+    printHtmlDocument(buildCurrentExportHtml(groups, docTitle), finishPdfExport);
   });
 
   /* ===================== Shared canvas drawing helpers ===================== */
+  /* Clears the FULL physical buffer, ignoring whatever transform is currently on the context.
+     clearRect(0, 0, CANVAS_W, CANVAS_H) is only equivalent to that when the buffer happens to be
+     exactly CANVAS_W x CANVAS_H — the editor canvas is HiDPI-scaled (see resizeEditorCanvasForDPI),
+     so its rounded pixel dimensions don't always divide back to exactly the logical size, and a
+     logical-space clear can leave a strip of stale pixels along the bottom/right edge. Those stale
+     pixels belong to whatever was drawn there last, i.e. a DIFFERENT shot — which is exactly the
+     "bottom of another frame's image showing through" symptom. */
+  function clearWholeCanvas(ctx){
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+    ctx.restore();
+  }
+
+  /* Pen/eraser strokes are composited from their OWN offscreen layer instead of being painted
+     straight onto the same surface as the photo.
+     Why: an eraser stroke draws with globalCompositeOperation:'destination-out'. On one shared
+     surface that punches a hole through the photo underneath as well — which is what made the
+     Pixel eraser read as a white "background-coloured pen" (the white .editor-frame-inner showing
+     through the hole it made), leave its marks sitting at fixed canvas coordinates when the photo
+     was moved out from under them, and leave visible traces even in places where there was
+     nothing drawn to erase in the first place.
+     With strokes on their own layer, destination-out can only ever remove ink. The photo is
+     untouchable by the eraser, erasing over bare photo or bare background is a genuine no-op that
+     renders nothing at all, and moving the photo can't drag holes around with it because there
+     are no holes — only ink that is or isn't there. */
+  let inkCanvas = null, inkCtx = null;
+  function paintStrokeLayer(ctx, strokes){
+    if(!strokes || strokes.length === 0) return;
+    const canvas = ctx.canvas;
+    if(!inkCanvas){ inkCanvas = document.createElement('canvas'); inkCtx = inkCanvas.getContext('2d'); }
+    if(inkCanvas.width !== canvas.width || inkCanvas.height !== canvas.height){
+      inkCanvas.width = canvas.width;   /* assigning width/height already clears the bitmap */
+      inkCanvas.height = canvas.height;
+    } else {
+      inkCtx.setTransform(1, 0, 0, 1, 0, 0);
+      inkCtx.clearRect(0, 0, inkCanvas.width, inkCanvas.height);
+    }
+    /* Every drawing call in this file works in logical CANVAS_W x CANVAS_H coordinates while the
+       physical buffer may be larger — mirror that same scale onto the ink layer so stroke
+       coordinates land exactly on top of the base layer underneath. */
+    const scale = canvas.width / CANVAS_W;
+    inkCtx.setTransform(scale, 0, 0, scale, 0, 0);
+    inkCtx.globalCompositeOperation = 'source-over';
+    strokes.forEach(s => drawStroke(inkCtx, s));
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.drawImage(inkCanvas, 0, 0);
+    ctx.restore();
+  }
+
   function renderFrameCanvas(ctx, baseImage, strokes, transform){
-    ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+    clearWholeCanvas(ctx);
     ctx.globalCompositeOperation = 'source-over';
     if(baseImage){
       const t = transform || { scale: 1, offsetX: 0, offsetY: 0 };
@@ -5574,13 +5846,13 @@
       const x = (CANVAS_W - w) / 2 + t.offsetX, y = (CANVAS_H - h) / 2 + t.offsetY;
       ctx.drawImage(baseImage, x, y, w, h);
     }
-    strokes.forEach(s => drawStroke(ctx, s));
+    paintStrokeLayer(ctx, strokes);
     ctx.globalCompositeOperation = 'source-over';
   }
 
   function flattenToDataURL(ctx, baseImage, strokes, transform){
     const canvas = ctx.canvas;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    clearWholeCanvas(ctx);
     ctx.globalCompositeOperation = 'source-over';
     /* No white fillRect here: baking an opaque background over the *entire* canvas is what
        made the guide lines disappear the moment this got reloaded as baseImage elsewhere —
@@ -5595,7 +5867,9 @@
       const x = (canvas.width - w) / 2 + t.offsetX, y = (canvas.height - h) / 2 + t.offsetY;
       ctx.drawImage(baseImage, x, y, w, h);
     }
-    strokes.forEach(s => drawStroke(ctx, s));
+    /* Same layered composite as the live canvas — the flattened thumbnail has to agree with what
+       the editor actually showed, including "an eraser stroke over bare photo left no mark". */
+    paintStrokeLayer(ctx, strokes);
     const url = canvas.toDataURL('image/png');
     renderFrameCanvas(ctx, baseImage, strokes, transform);
     return url;
@@ -6272,11 +6546,11 @@
     currentStrokes.forEach(s => { byId[s.id] = s; });
     return actions.map(a => {
       if(a.type === 'add' && a.strokeData === STROKE_ACTION_SENTINEL && byId[a.strokeId]){
-        return Object.assign({}, a, { strokeData: JSON.parse(JSON.stringify(byId[a.strokeId])) });
+        return Object.assign({}, a, { strokeData: deepClone(byId[a.strokeId]) });
       }
       if(a.type === 'erase' && Array.isArray(a.removed)){
         const newRemoved = a.removed.map(entry => (entry.strokeData === STROKE_ACTION_SENTINEL && byId[entry.strokeId])
-          ? Object.assign({}, entry, { strokeData: JSON.parse(JSON.stringify(byId[entry.strokeId])) })
+          ? Object.assign({}, entry, { strokeData: deepClone(byId[entry.strokeId]) })
           : entry);
         return Object.assign({}, a, { removed: newRemoved });
       }
@@ -6293,9 +6567,20 @@
     editorState.baseImage = null;
     editorState.photoDataURL = null;
     editorState.strokes = [];
+    /* Wipe the shared canvas RIGHT NOW, synchronously, before the open animation starts and
+       before any of the async image loads below can resolve. editorCanvas/ectx are a single
+       surface reused for every shot, and until this ran, the pixels sitting on it were still the
+       previously-edited shot's — visible for the whole FLIP grow-in animation and then for however
+       long this shot's photo took to decode (the branches below only repaint from inside their
+       own img.onload). resizeEditorCanvasForDPI() further down does clear the buffer, but only as
+       a side effect of the dimensions actually changing, so it early-returns and clears nothing on
+       every open after the first at the same size. That is the "another frame's image showing
+       through while editing this one" report; from here on, the only thing this canvas can ever
+       show is the shot currently open in it. */
+    clearWholeCanvas(ectx);
     editorState.tool = 'pen';
     editorState.color = '#221F1C';
-    editorState.photoTransform = cut.editorPhotoTransform ? JSON.parse(JSON.stringify(cut.editorPhotoTransform)) : { scale: 1, offsetX: 0, offsetY: 0 };
+    editorState.photoTransform = cut.editorPhotoTransform ? deepClone(cut.editorPhotoTransform) : { scale: 1, offsetX: 0, offsetY: 0 };
     movePointers.clear();
     clearTimeout(photoLongPressTimer);
     hidePhotoSelectUI();
@@ -6305,12 +6590,12 @@
     /* Undo/redo history is restored right alongside the strokes themselves — otherwise the
        first thing anyone does after reopening (erase, then hit Undo) looks broken, since there'd
        be no record of anything to undo even though the drawing is sitting right there. */
-    const restoredStrokesForHydration = Array.isArray(cut.editorStrokes) ? JSON.parse(JSON.stringify(cut.editorStrokes)) : [];
+    const restoredStrokesForHydration = Array.isArray(cut.editorStrokes) ? deepClone(cut.editorStrokes) : [];
     editorState.actions = Array.isArray(cut.editorActions)
-      ? hydrateStrokeActionsFromStorage(hydratePhotoActionsFromStorage(JSON.parse(JSON.stringify(cut.editorActions)), cut.editorPhoto || null), restoredStrokesForHydration)
+      ? hydrateStrokeActionsFromStorage(hydratePhotoActionsFromStorage(deepClone(cut.editorActions), cut.editorPhoto || null), restoredStrokesForHydration)
       : [];
     editorState.redoActions = Array.isArray(cut.editorRedoActions)
-      ? hydrateStrokeActionsFromStorage(hydratePhotoActionsFromStorage(JSON.parse(JSON.stringify(cut.editorRedoActions)), cut.editorPhoto || null), restoredStrokesForHydration)
+      ? hydrateStrokeActionsFromStorage(hydratePhotoActionsFromStorage(deepClone(cut.editorRedoActions), cut.editorPhoto || null), restoredStrokesForHydration)
       : [];
     updateEditorUndoRedoButtons();
 
@@ -6338,7 +6623,7 @@
        keep working after closing and reopening. (The inline card canvas can no longer draw at
        all, so there's no longer a way for cut.image to change behind the editor's back and
        invalidate these — they only ever change here, inside the editor itself.) */
-    const restoreStrokes = Array.isArray(cut.editorStrokes) ? JSON.parse(JSON.stringify(cut.editorStrokes)) : null;
+    const restoreStrokes = Array.isArray(cut.editorStrokes) ? deepClone(cut.editorStrokes) : null;
     if(cut.editorPhoto){
       editorEmptyHint.style.display = 'none';
       editorState.photoDataURL = cut.editorPhoto;
@@ -6423,7 +6708,7 @@
      the photo entirely. */
   function applyPhotoState(dataURL, transform){
     editorState.photoDataURL = dataURL;
-    editorState.photoTransform = transform ? JSON.parse(JSON.stringify(transform)) : { scale: 1, offsetX: 0, offsetY: 0 };
+    editorState.photoTransform = transform ? deepClone(transform) : { scale: 1, offsetX: 0, offsetY: 0 };
     if(!dataURL){
       editorState.baseImage = null;
       hidePhotoSelectUI();
@@ -6443,7 +6728,7 @@
   function deletePhotoFromEditor(){
     if(!editorState.baseImage) return;
     const prevPhotoDataURL = editorState.photoDataURL;
-    const prevPhotoTransform = JSON.parse(JSON.stringify(editorState.photoTransform));
+    const prevPhotoTransform = deepClone(editorState.photoTransform);
     editorState.actions.push({ type: 'photo-set', prevPhotoDataURL, prevPhotoTransform, newPhotoDataURL: null, newPhotoTransform: { scale: 1, offsetX: 0, offsetY: 0 } });
     editorState.redoActions = [];
     applyPhotoState(null, null);
@@ -6482,10 +6767,10 @@
     const cut = state.cuts[editorState.cutId];
     if(!cut) return;
     cut.editorPhoto = editorState.photoDataURL || null;
-    cut.editorPhotoTransform = editorState.photoDataURL ? JSON.parse(JSON.stringify(editorState.photoTransform)) : null;
-    cut.editorStrokes = JSON.parse(JSON.stringify(editorState.strokes));
-    cut.editorActions = compressStrokeActionsForStorage(compressPhotoActionsForStorage(JSON.parse(JSON.stringify(editorState.actions)), cut.editorPhoto), editorState.strokes);
-    cut.editorRedoActions = compressStrokeActionsForStorage(compressPhotoActionsForStorage(JSON.parse(JSON.stringify(editorState.redoActions)), cut.editorPhoto), editorState.strokes);
+    cut.editorPhotoTransform = editorState.photoDataURL ? deepClone(editorState.photoTransform) : null;
+    cut.editorStrokes = deepClone(editorState.strokes);
+    cut.editorActions = compressStrokeActionsForStorage(compressPhotoActionsForStorage(deepClone(editorState.actions), cut.editorPhoto), editorState.strokes);
+    cut.editorRedoActions = compressStrokeActionsForStorage(compressPhotoActionsForStorage(deepClone(editorState.redoActions), cut.editorPhoto), editorState.strokes);
     debouncedSaveCut(cut.id);
   }
 
@@ -6505,11 +6790,11 @@
        to anything that happens to editorState afterward, regardless of what the person does next. */
     const closingCutId = editorState.cutId;
     const snapshotBaseImage = editorState.baseImage;
-    const snapshotStrokes = JSON.parse(JSON.stringify(editorState.strokes));
+    const snapshotStrokes = deepClone(editorState.strokes);
     const snapshotPhotoDataURL = editorState.photoDataURL;
-    const snapshotPhotoTransform = JSON.parse(JSON.stringify(editorState.photoTransform));
-    const snapshotActions = JSON.parse(JSON.stringify(editorState.actions));
-    const snapshotRedoActions = JSON.parse(JSON.stringify(editorState.redoActions));
+    const snapshotPhotoTransform = deepClone(editorState.photoTransform);
+    const snapshotActions = deepClone(editorState.actions);
+    const snapshotRedoActions = deepClone(editorState.redoActions);
 
     /* Kick the shrink animation off first, before any of the save/thumbnail work below, so Done
        feels instantly responsive instead of visibly waiting on a canvas encode + localStorage
@@ -6920,6 +7205,13 @@
   });
   function drawPenLivePreview(e){
     if(!currentStroke || !currentStroke.points.length || !penRawBuffer) return;
+    /* Eraser strokes are deliberately excluded from the live preview. The preview paints straight
+       onto the visible canvas, outside the layered composite in paintStrokeLayer — for a pen that
+       is harmless (it's just ink drawn a frame early, overwritten by the next redraw), but a
+       destination-out stroke drawn there would punch a real hole through the photo for a frame,
+       which is precisely the behaviour the layered eraser exists to remove. Erasing already
+       repaints from confirmed data on every pointermove, so nothing is lost by skipping it. */
+    if(currentStroke.mode === 'eraser') return;
     const uncommittedTail = penRawBuffer.slice(penCommittedCount);
     let predicted = [];
     if(typeof e.getPredictedEvents === 'function'){
@@ -7119,9 +7411,9 @@
     } else if(action.type === 'photo-set'){
       applyPhotoState(action.prevPhotoDataURL, action.prevPhotoTransform);
     } else if(action.type === 'photo-transform'){
-      editorState.photoTransform = JSON.parse(JSON.stringify(action.prevTransform));
+      editorState.photoTransform = deepClone(action.prevTransform);
     } else if(action.type === 'clear'){
-      editorState.strokes = JSON.parse(JSON.stringify(action.prevStrokes));
+      editorState.strokes = deepClone(action.prevStrokes);
       applyPhotoState(action.prevPhotoDataURL, action.prevPhotoTransform);
     } else if(action.type === 'transform'){
       action.before.forEach(entry => {
@@ -7148,7 +7440,7 @@
     } else if(action.type === 'photo-set'){
       applyPhotoState(action.newPhotoDataURL, action.newPhotoTransform);
     } else if(action.type === 'photo-transform'){
-      editorState.photoTransform = JSON.parse(JSON.stringify(action.newTransform));
+      editorState.photoTransform = deepClone(action.newTransform);
     } else if(action.type === 'clear'){
       editorState.strokes = [];
       applyPhotoState(null, null);
@@ -7165,9 +7457,9 @@
   });
   document.getElementById('clearBtn').addEventListener('click', () => {
     if(editorState.strokes.length === 0 && !editorState.photoDataURL) return; /* nothing to clear */
-    const prevStrokes = JSON.parse(JSON.stringify(editorState.strokes));
+    const prevStrokes = deepClone(editorState.strokes);
     const prevPhotoDataURL = editorState.photoDataURL;
-    const prevPhotoTransform = JSON.parse(JSON.stringify(editorState.photoTransform));
+    const prevPhotoTransform = deepClone(editorState.photoTransform);
     editorState.actions.push({ type: 'clear', prevStrokes, prevPhotoDataURL, prevPhotoTransform });
     editorState.redoActions = [];
     editorState.strokes = [];
@@ -7234,7 +7526,7 @@
 
   function loadImageBlobIntoEditor(blob){
     const prevPhotoDataURL = editorState.photoDataURL;
-    const prevPhotoTransform = editorState.photoTransform ? JSON.parse(JSON.stringify(editorState.photoTransform)) : { scale: 1, offsetX: 0, offsetY: 0 };
+    const prevPhotoTransform = editorState.photoTransform ? deepClone(editorState.photoTransform) : { scale: 1, offsetX: 0, offsetY: 0 };
     const reader = new FileReader();
     reader.onload = () => {
       const dataURL = reader.result;
