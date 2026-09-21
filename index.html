@@ -120,6 +120,29 @@
     border-bottom:1px solid var(--line);
     position:relative;
   }
+  /* iOS 26+ Liquid Glass "scroll edge effect": the system paints a progressive blur over the top
+     of an installed web app — solid across the status bar, then FADING OUT over roughly 35pt
+     below it. iOS 27 made that fade far more contrasty, which is when it turned into a visible
+     wash over the top half of the project title.
+     The page cannot switch it off. Every documented attempt failed: an opaque status-bar style,
+     a flat background colour with no gradient, the blur moved onto a pseudo-element, and a fixed
+     opaque strip covering the status bar. env(safe-area-inset-*) does NOT grow to describe the
+     faded band, so there is nothing to pad against; the old backdrop-filter + negative-top
+     overlay trick stopped working in standalone web apps; and where native apps got
+     scrollEdgeEffectStyle in iOS 27, web apps got no equivalent control at all.
+     What is left is geometry: put the content below the fade. That is what this does — extra top
+     clearance, applied only in the installed app (display-mode: standalone), so nothing changes
+     in Safari or on desktop.
+     --ios-glass-clearance is the ONE number to change. 36px puts the title clear of the strongest
+     part of the fade at a cost of ~4% of an iPad's landscape height. Measurements elsewhere put
+     the blur fully crisp only ~100pt down, which is far too much to give up here, so this is a
+     deliberate compromise rather than a guaranteed-clean result. Set it to 0 to take the
+     clearance away entirely. */
+  :root{ --ios-glass-clearance: 36px; }
+  @media (display-mode: standalone){
+    .topbar{ padding-top: calc(max(12px, env(safe-area-inset-top)) + var(--ios-glass-clearance)); }
+    .editor-topbar{ padding-top: calc(max(14px, env(safe-area-inset-top)) + var(--ios-glass-clearance)); }
+  }
   .icon-btn{
     width:38px; height:38px; border-radius:11px; flex:0 0 auto;
     display:flex; align-items:center; justify-content:center;
@@ -1271,7 +1294,7 @@
 
 <div id="toast" class="toast"></div>
 <div id="storageWarningBanner" class="storage-warning-banner">
-  <span>Couldn't save — storage may be full</span>
+  <span>Couldn't save — storage is full. Export a backup now.</span>
   <button id="storageWarningDismiss" aria-label="Dismiss">✕</button>
 </div>
 
@@ -1421,20 +1444,23 @@
   const hasLocalStorage = !hasClaudeStorage && lsAvailable();
   const LS_PREFIX = 'storyboard-app:';
 
-  let storageFailureShown = false;
-  /* Shows the persistent storage-warning banner (see its CSS comment for why this needs to be
-     more durable than the auto-dismissing toast). Safe to call on every single failed save —
-     it's just a class toggle, not spammy, and re-calling it while already shown is a no-op. */
-  function notifyStorageFailure(){
-    storageFailureShown = true;
+  /* Keys whose last write FAILED and has not since succeeded. This is per-key rather than a
+     single boolean because a boolean made the banner lie. The old version cleared the warning on
+     the next successful save of ANY key: a big cut record would blow the quota and be lost, then
+     a few hundred bytes of order/index data would save fine a moment later and take the warning
+     down with it — so the banner flickered ("이따금씩 뜬다") while the drawing was, in fact, never
+     saved, and nothing said so at quit time. Now the banner stays up until the specific key that
+     failed writes successfully. */
+  const failedStorageKeys = new Set();
+  function notifyStorageFailure(key){
+    if(key) failedStorageKeys.add(key);
     const banner = document.getElementById('storageWarningBanner');
     if(banner) banner.classList.add('show');
   }
-  /* Called on every successful save — cheap no-op unless the banner is actually showing, in
-     which case a save going through again means whatever was blocking storage has cleared. */
-  function notifyStorageRecovered(){
-    if(!storageFailureShown) return;
-    storageFailureShown = false;
+  /* Called on every successful save. Only takes the banner down once nothing is still outstanding. */
+  function notifyStorageRecovered(key){
+    if(key) failedStorageKeys.delete(key);
+    if(failedStorageKeys.size > 0) return;
     const banner = document.getElementById('storageWarningBanner');
     if(banner) banner.classList.remove('show');
   }
@@ -1452,26 +1478,26 @@
   }
   async function storSet(key, value){
     if(hasClaudeStorage){
-      try{ await window.storage.set(key, value, false); notifyStorageRecovered(); return true; }
-      catch(e){ console.error('storage set failed', key, e); notifyStorageFailure(); return false; }
+      try{ await window.storage.set(key, value, false); notifyStorageRecovered(key); return true; }
+      catch(e){ console.error('storage set failed', key, e); notifyStorageFailure(key); return false; }
     }
     if(hasLocalStorage){
-      try{ localStorage.setItem(LS_PREFIX + key, value); notifyStorageRecovered(); return true; }
-      catch(e){ console.error('localStorage set failed', key, e); notifyStorageFailure(); return false; }
+      try{ localStorage.setItem(LS_PREFIX + key, value); notifyStorageRecovered(key); return true; }
+      catch(e){ console.error('localStorage set failed', key, e); notifyStorageFailure(key); return false; }
     }
-    notifyStorageFailure();
+    notifyStorageFailure(key);
     return false;
   }
   async function storDelete(key){
     if(hasClaudeStorage){
-      try{ await window.storage.delete(key, false); notifyStorageRecovered(); return true; }
-      catch(e){ notifyStorageFailure(); return false; }
+      try{ await window.storage.delete(key, false); notifyStorageRecovered(key); return true; }
+      catch(e){ notifyStorageFailure(key); return false; }
     }
     if(hasLocalStorage){
-      try{ localStorage.removeItem(LS_PREFIX + key); notifyStorageRecovered(); return true; }
-      catch(e){ notifyStorageFailure(); return false; }
+      try{ localStorage.removeItem(LS_PREFIX + key); notifyStorageRecovered(key); return true; }
+      catch(e){ notifyStorageFailure(key); return false; }
     }
-    notifyStorageFailure();
+    notifyStorageFailure(key);
     return false;
   }
   if(navigator.storage && navigator.storage.persist){
@@ -1482,15 +1508,42 @@
   function saveMetaFor(pid, title){ return storSet('project:' + pid + ':meta', JSON.stringify({ title })); }
   function saveOrderFor(pid, order){ return storSet('project:' + pid + ':order', JSON.stringify(order)); }
   function saveTrashOrderFor(pid, trashOrder){ return storSet('project:' + pid + ':trash', JSON.stringify(trashOrder)); }
+  /* Stroke points carry full float precision in memory — pointer events deliver sub-pixel
+     coordinates and the smoothing windows produce long decimals from them, so a single point
+     serialises as something like {"x":234.56789012345678,"y":117.00000000000003,
+     "pressure":0.4823529411764706}: ~70 bytes for a position on a 1332px-wide canvas.
+     None of that precision survives being drawn. Quantising to 0.01px is a hundredth of a pixel
+     at canvas scale — well below anything that can be rendered, let alone seen — and pressure to
+     three places is finer than any stylus reports. Doing it here means it happens at the storage
+     boundary only: the live stroke under the pen is untouched, so drawing and smoothing behave
+     exactly as before, and the quantised version is what gets written and reloaded.
+     This is a mitigation for the quota problem, not a cure — see the note on saveCutFor. */
+  function roundForStorage(value){
+    if(Array.isArray(value)) return value.map(roundForStorage);
+    if(value && typeof value === 'object'){
+      if(typeof value.x === 'number' && typeof value.y === 'number'){
+        const out = Object.assign({}, value);
+        out.x = Math.round(value.x * 100) / 100;
+        out.y = Math.round(value.y * 100) / 100;
+        if(typeof value.pressure === 'number') out.pressure = Math.round(value.pressure * 1000) / 1000;
+        return out;
+      }
+      const out = {};
+      for(const k in value) out[k] = roundForStorage(value[k]);
+      return out;
+    }
+    return value;
+  }
+
   function saveCutFor(pid, id, cut){
     return storSet('project:' + pid + ':cut:' + id, JSON.stringify({
       scene: cut.scene || '', notes: cut.notes || '', image: cut.image || null,
       notesHtml: cut.notesHtml || null,
-      editorStrokes: Array.isArray(cut.editorStrokes) ? cut.editorStrokes : null,
+      editorStrokes: Array.isArray(cut.editorStrokes) ? roundForStorage(cut.editorStrokes) : null,
       editorPhoto: cut.editorPhoto || null,
       editorPhotoTransform: cut.editorPhotoTransform || null,
-      editorActions: Array.isArray(cut.editorActions) ? cut.editorActions : null,
-      editorRedoActions: Array.isArray(cut.editorRedoActions) ? cut.editorRedoActions : null,
+      editorActions: Array.isArray(cut.editorActions) ? roundForStorage(cut.editorActions) : null,
+      editorRedoActions: Array.isArray(cut.editorRedoActions) ? roundForStorage(cut.editorRedoActions) : null,
       trashedScene: cut.trashedScene != null ? cut.trashedScene : null,
       trashedShotNumber: cut.trashedShotNumber != null ? cut.trashedShotNumber : null,
       trashedAt: cut.trashedAt != null ? cut.trashedAt : null
@@ -3459,7 +3512,16 @@
   /* cut.notesHtml can come from an imported backup file, not just this app's own editor —
      strip it down to a small safe allowlist before ever assigning it via innerHTML. */
   function sanitizeRichHtml(html){
-    const tmp = document.createElement('div');
+    /* Parsed into a <template> rather than a plain div. Assigning innerHTML on a normal element
+       makes the browser build live nodes immediately — before a single line of the filtering
+       below has run — so markup like <img src="nope" onerror="..."> fires its handler on the way
+       in and the filter arrives too late. A <template>'s content lives in an inert document
+       fragment: nothing in it loads a resource or runs a handler, it just sits there as
+       structure, which is exactly what this function wants to inspect. Same walk, same allowed
+       tags, same output; only the box it gets opened in changes.
+       The practical risk here is close to zero — no server, no other users, and it would take
+       Kevin pasting hostile markup into his own notes — but the safe version costs nothing. */
+    const tmp = document.createElement('template');
     tmp.innerHTML = html;
     const allowedTags = new Set(['div', 'br', 'b', 'strong', 'i', 'em', 'u', 's', 'strike', 'span', 'font']);
     (function walk(node){
@@ -3481,8 +3543,11 @@
         });
         walk(child);
       });
-    })(tmp);
-    return tmp.innerHTML;
+    })(tmp.content);
+    /* A template exposes its parsed markup through .content, so serialise that back out. */
+    const out = document.createElement('div');
+    out.appendChild(tmp.content.cloneNode(true));
+    return out.innerHTML;
   }
 
   function setupNotesLongPress(notesWrap, cut){
@@ -6795,10 +6860,85 @@
      data and isn't touched. The larger duplication in 'add'/'erase' actions (whole stroke
      objects, also present in editorStrokes) uses the same strategy — see the block below. */
   const PHOTO_ACTION_SENTINEL = '__CURRENT_PHOTO__';
+
+  /* ---- Editor history bounds ----
+     The global structural undo stack has been capped at MAX_UNDO (30) for a long time. The
+     editor's own per-shot history had no cap at all — and unlike the global stack it gets
+     PERSISTED into cut.editorActions, so it grew forever inside the saved record.
+     Most action types are cheap once stored, because the sentinel swaps below replace their
+     payload with a short marker whenever the same data is already sitting on the cut. Two types
+     are not covered by that and keep full snapshots: 'clear' (every stroke on the frame plus the
+     photo, measured at ~359 KB on a shot with an imported photo) and 'transform' (a before/after
+     copy of every stroke the Selection tool moved). Nothing bounded how many of those a shot
+     accumulated, and the whole app only gets ~5 MB of localStorage — so a handful of Clear
+     presses on one shot could eat a third of the total budget and start the "couldn't save"
+     failures, jumping by hundreds of KB at a time rather than creeping up.
+     Two limits, both trimming from the OLDEST end only. Trimming contiguously from the front is
+     what keeps undo correct: dropping an action out of the middle would leave later actions
+     undoing onto a state that no longer matches. The cost of the cap is simply that history does
+     not reach infinitely far back.
+     The count limit is deliberately generous (150) because every pen stroke is an action and a
+     shallow stroke-undo would be far more annoying than the storage it saves. The byte budget is
+     what actually does the work, and it only counts the two heavy types — so ordinary drawing
+     never trips it, while repeated Clears with a photo attached do. */
+  const MAX_EDITOR_ACTIONS = 150;
+  /* Sized against what the app actually has to spend, not against what feels generous:
+     localStorage gives the WHOLE app about 5 MB, so letting a single shot's undo history claim
+     1.5 MB of that would just move the cliff rather than remove it. At 400 KB a shot keeps
+     roughly two Clear presses' worth of a photo-bearing frame, or dozens of Selection-tool
+     moves, and twelve such shots still fit inside the budget. Undoing further back than two
+     Clears is rare; running out of storage is not. */
+  const EDITOR_HISTORY_BYTE_BUDGET = 400_000;
+  /* Weights are cached per action object rather than recomputed. Without this, serialising a few
+     multi-hundred-KB 'clear' actions on every trim — and a trim runs on every stroke — would cost
+     more than the drawing itself. A WeakMap keeps the cache out of the action objects, so nothing
+     extra is ever written to storage, and entries disappear with the actions themselves. */
+  const editorActionWeights = new WeakMap();
+  function editorActionWeight(a){
+    if(!a || (a.type !== 'clear' && a.type !== 'transform')) return 0;
+    let w = editorActionWeights.get(a);
+    if(w === undefined){
+      try{ w = JSON.stringify(a).length; }catch(e){ w = 0; }
+      editorActionWeights.set(a, w);
+    }
+    return w;
+  }
+  function trimEditorHistory(){
+    const acts = editorState.actions;
+    while(acts.length > MAX_EDITOR_ACTIONS) acts.shift();
+    let total = 0;
+    for(let i = 0; i < acts.length; i++) total += editorActionWeight(acts[i]);
+    /* Never trim to empty: the newest action is always kept, so whatever was just done stays
+       undoable even if it is on its own bigger than the whole budget. */
+    while(acts.length > 1 && total > EDITOR_HISTORY_BYTE_BUDGET){
+      total -= editorActionWeight(acts[0]);
+      acts.shift();
+    }
+    const redo = editorState.redoActions;
+    while(redo.length > MAX_EDITOR_ACTIONS) redo.shift();
+  }
+  function pushEditorAction(action){
+    editorState.actions.push(action);
+    trimEditorHistory();
+  }
+  /* 'clear' actions carry a prevPhotoDataURL for exactly the same reason photo-set does — Clear
+     wipes the photo as well as the strokes, so undoing it has to put the photo back — and it was
+     left out of this swap originally. Measured cost of leaving it out: a Clear on a shot with an
+     imported photo pinned a full extra copy of that photo into the saved record permanently, and
+     nothing caps how many Clear actions a shot accumulates.
+     Worth being precise about when this actually helps, because it is narrower than it looks.
+     The swap can only fire when the stored string matches the cut's CURRENT photo, and right
+     after a Clear the current photo is null — so nothing is deduplicated at that moment, and
+     nor should it be: the copy inside the action is then the only copy left, and dropping it
+     would break Undo. It pays off once the photo is back: undoing the Clear, or re-importing the
+     same photo and carrying on. Repeated Clears of DIFFERENT photos still each keep their own
+     copy — see the note in the progress doc about history growth being uncapped, which is the
+     separate, larger problem this does not solve. */
+  function isPhotoAction(a){ return a.type === 'photo-set' || a.type === 'clear'; }
   function compressPhotoActionsForStorage(actions, currentPhoto){
     if(!currentPhoto) return actions;
     return actions.map(a => {
-      if(a.type !== 'photo-set') return a;
+      if(!isPhotoAction(a)) return a;
       const copy = Object.assign({}, a);
       if(copy.prevPhotoDataURL === currentPhoto) copy.prevPhotoDataURL = PHOTO_ACTION_SENTINEL;
       if(copy.newPhotoDataURL === currentPhoto) copy.newPhotoDataURL = PHOTO_ACTION_SENTINEL;
@@ -6808,7 +6948,7 @@
   function hydratePhotoActionsFromStorage(actions, currentPhoto){
     if(!currentPhoto) return actions;
     return actions.map(a => {
-      if(a.type !== 'photo-set') return a;
+      if(!isPhotoAction(a)) return a;
       const copy = Object.assign({}, a);
       if(copy.prevPhotoDataURL === PHOTO_ACTION_SENTINEL) copy.prevPhotoDataURL = currentPhoto;
       if(copy.newPhotoDataURL === PHOTO_ACTION_SENTINEL) copy.newPhotoDataURL = currentPhoto;
@@ -6905,6 +7045,10 @@
     editorState.redoActions = Array.isArray(cut.editorRedoActions)
       ? hydrateStrokeActionsFromStorage(hydratePhotoActionsFromStorage(deepClone(cut.editorRedoActions), cut.editorPhoto || null), restoredStrokesForHydration)
       : [];
+    /* Bound what came back from storage too, not just what gets pushed from here on. Records
+       written before this cap existed can be well over it, and an unbounded history reloaded
+       from disk would just be re-saved unbounded on the next autosave. */
+    trimEditorHistory();
     updateEditorUndoRedoButtons();
 
     editorCutNumEl.textContent = shotLabelFor(cutId);
@@ -7037,7 +7181,7 @@
     if(!editorState.baseImage) return;
     const prevPhotoDataURL = editorState.photoDataURL;
     const prevPhotoTransform = deepClone(editorState.photoTransform);
-    editorState.actions.push({ type: 'photo-set', prevPhotoDataURL, prevPhotoTransform, newPhotoDataURL: null, newPhotoTransform: { scale: 1, offsetX: 0, offsetY: 0 } });
+    pushEditorAction({ type: 'photo-set', prevPhotoDataURL, prevPhotoTransform, newPhotoDataURL: null, newPhotoTransform: { scale: 1, offsetX: 0, offsetY: 0 } });
     editorState.redoActions = [];
     applyPhotoState(null, null);
     updateEditorUndoRedoButtons();
@@ -7336,7 +7480,7 @@
       selectionGesture = null;
       if(moved){
         const afterSnapshot = selection.strokes.map(s => ({ id: s.id, points: clonePoints(s.points), size: s.size }));
-        editorState.actions.push({ type: 'transform', before: beforeSnapshot, after: afterSnapshot });
+        pushEditorAction({ type: 'transform', before: beforeSnapshot, after: afterSnapshot });
         editorState.redoActions = [];
         updateEditorUndoRedoButtons();
         autosaveEditorState();
@@ -7430,7 +7574,7 @@
     } else {
       currentStroke = { id: uid('s'), mode: editorState.tool, color: editorState.color, size: (editorState.tool === 'eraser' ? editorState.eraserSize : editorState.size), points: [p] };
       editorState.strokes.push(currentStroke);
-      editorState.actions.push({ type: 'add', strokeId: currentStroke.id, strokeData: currentStroke });
+      pushEditorAction({ type: 'add', strokeId: currentStroke.id, strokeData: currentStroke });
       editorState.redoActions = [];
       updateEditorUndoRedoButtons();
       redrawEditor();
@@ -7586,7 +7730,7 @@
           const before = moveActionStartTransform;
           const after = editorState.photoTransform;
           if(before.offsetX !== after.offsetX || before.offsetY !== after.offsetY || before.scale !== after.scale){
-            editorState.actions.push({
+            pushEditorAction({
               type: 'photo-transform',
               prevTransform: { offsetX: before.offsetX, offsetY: before.offsetY, scale: before.scale },
               newTransform: { offsetX: after.offsetX, offsetY: after.offsetY, scale: after.scale }
@@ -7619,7 +7763,7 @@
        the same granularity a single pen stroke gets — one Undo click restores everything that
        particular drag erased, rather than needing one click per object it happened to cross. */
     if(eraseSessionRemovals && eraseSessionRemovals.length > 0){
-      editorState.actions.push({ type: 'erase', removed: eraseSessionRemovals });
+      pushEditorAction({ type: 'erase', removed: eraseSessionRemovals });
       editorState.redoActions = [];
       updateEditorUndoRedoButtons();
     }
@@ -7796,7 +7940,7 @@
         if(s){ s.points = clonePoints(entry.points); s.size = entry.size; }
       });
     }
-    editorState.actions.push(action);
+    pushEditorAction(action);
     updateEditorUndoRedoButtons();
     redrawEditor();
     autosaveEditorState();
@@ -7806,7 +7950,7 @@
     const prevStrokes = deepClone(editorState.strokes);
     const prevPhotoDataURL = editorState.photoDataURL;
     const prevPhotoTransform = deepClone(editorState.photoTransform);
-    editorState.actions.push({ type: 'clear', prevStrokes, prevPhotoDataURL, prevPhotoTransform });
+    pushEditorAction({ type: 'clear', prevStrokes, prevPhotoDataURL, prevPhotoTransform });
     editorState.redoActions = [];
     editorState.strokes = [];
     hidePhotoSelectUI();
@@ -7882,7 +8026,7 @@
         editorState.photoDataURL = dataURL;
         editorState.photoTransform = { scale: 1, offsetX: 0, offsetY: 0 };
         editorEmptyHint.style.display = 'none';
-        editorState.actions.push({
+        pushEditorAction({
           type: 'photo-set', prevPhotoDataURL, prevPhotoTransform,
           newPhotoDataURL: dataURL, newPhotoTransform: { scale: 1, offsetX: 0, offsetY: 0 }
         });
