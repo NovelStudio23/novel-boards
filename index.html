@@ -170,7 +170,11 @@
      before any of this, well clear, and padding it as well only wasted sidebar space.
      --ios-glass-clearance is the ONE number to change. Set it to 0 to remove the clearance. */
   :root{ --ios-glass-clearance: 28px; }
-  .app-standalone .topbar{ padding-top: calc(max(12px, env(safe-area-inset-top)) + var(--ios-glass-clearance)); }
+  /* padding-bottom 12 -> 4 in standalone only: the glass only cares where content STARTS (the
+     row is align-items:center with no fixed height, so the bottom padding never moves the title or
+     icons). Taking 8px back from the bottom gives back most of what the clearance added to the
+     topbar's height (108 -> ~100pt) with zero change to how far the content sits below the haze. */
+  .app-standalone .topbar{ padding-top: calc(max(12px, env(safe-area-inset-top)) + var(--ios-glass-clearance)); padding-bottom: 4px; }
   /* +6px over the main topbar: here the first painted thing is the Done button's filled pill,
      which starts right at the padding edge (the main topbar's content is vertically centred in a
      taller row, so it gets that offset for free). Without it the pill's top edge landed at
