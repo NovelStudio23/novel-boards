@@ -2093,18 +2093,53 @@
      whatever was tracked before entering/leaving edit mode instead of the shot actually on
      screen. Centralized here so every restore path stays in sync the same way. */
   function markViewedCut(id){ if(id) lastViewedCutId = id; }
-  /* Tracks the viewport size as of the last time we knew it was settled (i.e. not mid-rotation).
-     The orientation handler below updates this the instant it runs — but the axis-flip side
-     effect (landscape's scrollLeft vs portrait's scrollTop both reset to 0 when the grid
-     direction changes) can in some browsers fire its 'scroll' event *before* that handler gets a
-     chance to run and snapshot pendingOrientationRestoreId, corrupting lastViewedCutId with
-     "whatever's nearest position 0" (the start of the list) ahead of time — occasionally showing
-     up as "jumps to the beginning" a rotation or two in, since the corruption only happens when
-     that race is lost. Comparing against the last-settled size (rather than relying on which
-     event happens to fire first) closes that race regardless of ordering: any scroll event that
-     shows up while the live size disagrees with the last-settled one is a rotation artifact, not
-     a real user scroll, and is ignored here. */
-  let lastSettledW = window.innerWidth, lastSettledH = window.innerHeight;
+  /* Rotation keeps the shot on screen by remembering one shot id (lastViewedCutId, the
+     "anchor") and scrolling back to it once the new layout is in place. Two things have to hold
+     for that to work, and both used to depend on WHEN the browser fired its 'resize' event —
+     which on the iPad is not reliably the moment the layout actually flips (it can come before
+     the flip, after it, or, measured in tests, not at all). Whenever it didn't line up, the
+     flip's own scroll reset (a horizontal strip turning vertical starts again at 0) was either
+     never undone or got recorded as the anchor, and the view landed back on the first shots.
+     Both now key off the filmstrip's own laid-out size instead of the event:
+       1. The anchor is never taken from a scroll that coincides with a layout change. Every
+          scroll event compares the filmstrip's current size with the size it had when things
+          were last settled; a mismatch means "the layout just flipped under this scroll", which
+          is both ignored as a position AND treated as a rotation signal in its own right.
+       2. A ResizeObserver on the filmstrip (below, next to handleOrientationSignal) starts the
+          restore whenever its size really changes, whatever the window events did.
+     After a restore, the anchor is also held for a moment (until the restore's own scrolling has
+     gone quiet, or the user touches the screen): the restore's follow-up scroll events can't
+     nudge it onto a neighbouring shot (in Tile View several tiles tie for "centre"), so any
+     number of rotations in a row come back to the same shot instead of drifting. The hold is
+     deliberately short and self-ending — any later scroll, whatever caused it, is tracked
+     normally again. */
+  let settledFsW = -1, settledFsH = -1;
+  function recordSettledFilmstripSize(){ settledFsW = filmstripEl.clientWidth; settledFsH = filmstripEl.clientHeight; }
+  function filmstripSizeChanged(){ return filmstripEl.clientWidth !== settledFsW || filmstripEl.clientHeight !== settledFsH; }
+  let anchorHoldTimer = null;
+  let anchorHeld = false;
+  function holdAnchor(){
+    anchorHeld = true;
+    clearTimeout(anchorHoldTimer);
+    anchorHoldTimer = setTimeout(() => { anchorHeld = false; }, 350);
+  }
+  function releaseAnchor(){ anchorHeld = false; clearTimeout(anchorHoldTimer); }
+  /* Which shot a rotation should come back to. The centred one — except at the very start or
+     very end of the strip, where the first / last shot is what's "being looked at" (the same
+     rule the sidebar's current-scene marker uses). Without it, a screen showing 1A 1B 1C at the
+     start would come back from a rotation centred on 1B, no longer at the start. */
+  function findAnchorCutId(){
+    const sel = viewMode === 'tile' ? '.tile[data-unit-id]' : '.cut-unit[data-unit-id]';
+    const els = filmstripEl.querySelectorAll(sel);
+    if(els.length === 0) return null;
+    const vertical = isPortrait();
+    const pos = vertical ? filmstripEl.scrollTop : filmstripEl.scrollLeft;
+    const max = vertical ? filmstripEl.scrollHeight - filmstripEl.clientHeight : filmstripEl.scrollWidth - filmstripEl.clientWidth;
+    if(max > 0 && pos <= 2) return els[0].dataset.unitId;
+    if(max > 0 && pos >= max - 2) return els[els.length - 1].dataset.unitId;
+    return findCenteredCutId();
+  }
+  ['pointerdown', 'touchstart', 'wheel', 'keydown'].forEach(t => document.addEventListener(t, releaseAnchor, { capture: true, passive: true }));
   let lastScrollTrackTime = 0;
   filmstripEl.addEventListener('scroll', () => {
     if(jumpScrollSuppressed){
@@ -2122,11 +2157,15 @@
        then-immediately-rotate was enough to occasionally grab the wrong shot. findCenteredCutId is
        real DOM work (O(shot count)), so this is throttled by elapsed time instead — cheaper than
        every single scroll event on a long flick/momentum scroll, but without rAF's inherent lag. */
-    if(window.innerWidth !== lastSettledW || window.innerHeight !== lastSettledH) return;
+    if(orientationBatchActive) return;
+    if(settledFsW !== -1 && filmstripSizeChanged()){ handleOrientationSignal(); return; }
+    /* Each scroll event during the hold pushes its end out, so the hold lasts exactly as long
+       as the restore's own scrolling does (+350ms of quiet), not a guessed fixed time. */
+    if(anchorHeld){ holdAnchor(); return; }
     const now = performance.now();
     if(now - lastScrollTrackTime < 48) return;
     lastScrollTrackTime = now;
-    markViewedCut(findCenteredCutId());
+    markViewedCut(findAnchorCutId());
   }, { passive: true });
 
   /* ===================== Tile View custom scrollbar ===================== */
@@ -2381,20 +2420,17 @@
          corrupt lastViewedCutId via the tracker above, wiping out the value we actually need. */
       pendingOrientationRestoreId = lastViewedCutId;
     }
-    /* Mark the size as unsettled immediately, synchronously, as the very first thing any signal
-       in this batch does — this is what the scroll-tracker guard above compares against. */
-    lastSettledW = -1; lastSettledH = -1;
     clearTimeout(orientationRestoreTimer);
     orientationRestoreTimer = setTimeout(() => {
       orientationRestoreTimer = null;
       orientationBatchActive = false;
       if(pendingOrientationRestoreId) restoreScrollToCut(pendingOrientationRestoreId);
-      /* Settle now, after the restore's own scrollIntoView has been issued. Also re-confirm
-         lastViewedCutId synchronously right here (see markViewedCut's block comment) instead of
-         only waiting on the resulting 'scroll' event to (async, next frame) update it — closes
-         the window where a second rotation, started quickly, could otherwise read a stale value. */
-      lastSettledW = window.innerWidth; lastSettledH = window.innerHeight;
+      /* Settle now, after the restore's own scrollIntoView has been issued: record the size the
+         restore was done at (a later flip shows up as a mismatch — see the tracker above), keep
+         the anchor exactly as it was, and lock it until the user next scrolls. */
+      recordSettledFilmstripSize();
       markViewedCut(pendingOrientationRestoreId);
+      if(pendingOrientationRestoreId) holdAnchor();
       /* The notes-expand (long-press zoom) panel is centered via fixed left/top/width/height
          pixel values computed once at open time — with nothing re-running that math on rotation,
          it kept its pre-rotation position/size verbatim, which centered it for the OLD viewport
@@ -2425,6 +2461,13 @@
   }
   window.addEventListener('resize', handleOrientationSignal);
   window.addEventListener('orientationchange', handleOrientationSignal);
+  /* The layout itself changing size is the signal that can't arrive at the wrong time. */
+  if(window.ResizeObserver){
+    new ResizeObserver(() => {
+      if(settledFsW === -1 || !filmstripSizeChanged()) return;
+      handleOrientationSignal();
+    }).observe(filmstripEl);
+  }
 
   function setEditMode(on){
     const wasEditing = editMode;
@@ -2651,6 +2694,16 @@
     updateNavButtonsVisibility();
     updateTileScrollbar();
     updateFilmstripScrollbar();
+    /* If the rotation anchor isn't one of the shots now shown (never scrolled since launch, other
+       project, Trash), take whichever is centred once this render has laid out — otherwise the
+       next rotation has nothing to return to. The first render also records the settled size. */
+    requestAnimationFrame(() => {
+      if(orientationBatchActive) return;
+      if(settledFsW === -1) recordSettledFilmstripSize();
+      const sel = viewMode === 'tile' ? '.tile[data-unit-id]' : '.cut-unit[data-unit-id]';
+      const have = lastViewedCutId && [...filmstripEl.querySelectorAll(sel)].some(el => el.dataset.unitId === lastViewedCutId);
+      if(!have) markViewedCut(findAnchorCutId());
+    });
   }
 
   /* Display only. Marks the first shot of each scene on the cards/tiles already in the DOM:
