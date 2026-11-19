@@ -78,12 +78,18 @@
 
   *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; -webkit-user-select:none; user-select:none; -webkit-touch-callout:none; }
   .note-line, #projectTitle{ -webkit-user-select:text; user-select:text; -webkit-touch-callout:default; }
-  /* While a notes long-press is still a candidate to open the expand overlay (see
-     setupNotesLongPress), native text selection is suppressed so the two stationary-hold
-     gestures can't visibly compete for the same touch. Higher specificity than the rule above,
-     which it needs to override. Removed the instant the hold is ruled out (moved/lifted) or
-     succeeds, so a genuine text-selection drag right after is completely unaffected. */
-  .notes.longpress-armed .note-line{ -webkit-user-select:none; user-select:none; }
+  /* Selection guard while a note is held (class lives on <html>, see beginNoteHold). The previous
+     version only covered the compact card's own .note-line and was dropped the instant the expand
+     overlay opened (480ms) — while the finger was still down. iOS fires its own hold gesture at
+     roughly 500ms and hit-tests whatever is under the finger *at that moment*: by then the
+     overlay (user-select:text lines, an editing host in Edit mode) sits exactly under the finger,
+     so depending on a few ms of timer jitter the system started a selection there — and since
+     most of a note is blank lines, what got highlighted was an empty line box / the layout, not
+     text. Now selection stays off everywhere until the finger that opened the overlay lifts. */
+  html.note-hold .note-line, html.note-hold .notes-lines, html.note-hold .notes-lines-filler,
+  html.note-hold .notes-expand-panel{
+    -webkit-user-select:none !important; user-select:none !important; -webkit-touch-callout:none !important;
+  }
   /* height:100vh, NOT height:100% — and #app is pinned with position:fixed rather than sized in
      viewport units at all. This is the third attempt at the standalone-mode grey bottom bar, and
      the first with an actual mechanism behind it: a percentage height on html/body makes WebKit
@@ -797,14 +803,20 @@
     flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; gap:12px;
     padding:4px 12px; border-bottom:3px solid var(--ink); background:var(--paper);
   }
-  .notes-format-colors{ display:flex; align-items:center; gap:0; }
+  /* The six dots sit together in one pill the same height and tone as the B/I/U/S buttons, so the
+     toolbar reads as two matching groups instead of a loose row of large discs. */
+  .notes-format-colors{ display:flex; align-items:center; gap:0; padding:0 2px; border-radius:12px; background:var(--paper-line); }
   /* 44pt tap target around the same 22pt dot. The dot's colour lives in each button's inline style,
      so the button's own background is clipped away (padding 22 = zero-size content box) and ::before
      repaints it with background:inherit. ::after is the "selected" ring. */
-  .notes-color-swatch{ width:44px; height:44px; box-sizing:border-box; padding:22px; background-clip:content-box; border:none; border-radius:50%; flex:0 0 auto; position:relative; }
-  .notes-color-swatch::before{ content:''; position:absolute; inset:11px; border-radius:50%; background:inherit; background-clip:border-box; }
+  .notes-color-swatch{ width:44px; height:44px; box-sizing:border-box; padding:22px; background-clip:content-box !important; border:none; border-radius:50%; flex:0 0 auto; position:relative; }
+  /* !important above is the actual fix for "the dots are huge": each button's colour is an inline
+     `style="background:#…"`, and the `background` shorthand resets background-clip to border-box
+     — which silently overrode the content-box clip and painted every dot at the full 44pt target
+     (the 22pt ::before dot on top of it was invisible, same colour). Visible dot is now really 20pt. */
+  .notes-color-swatch::before{ content:''; position:absolute; inset:12px; border-radius:50%; background:inherit; background-clip:border-box; }
   .notes-color-swatch::after{ content:''; position:absolute; inset:8px; border-radius:50%; border:2px solid transparent; }
-  .notes-color-swatch.active::after{ border-color:var(--ink-dim); }
+  .notes-color-swatch.active::after{ border-color:var(--ink); }
   .notes-format-styles{ display:flex; align-items:center; gap:2px; }
   .notes-style-btn{
     width:44px; height:44px; border-radius:10px; background:var(--paper-line); color:var(--ink);
@@ -3776,42 +3788,86 @@
     return out.innerHTML;
   }
 
+  /* ---- Long-press selection guard ----
+     While a finger is down on a note, "hold to expand" and the system's own "hold to select text"
+     are two gestures racing for the same touch. noteHoldOn is true from touchdown until the hold is
+     ruled out (finger moved / lifted early) — or, if the hold *succeeds* and the overlay opens,
+     until that same finger lifts. The old code released the guard at the moment the overlay opened
+     (480ms), which left the overlay under a still-pressed finger just as iOS's ~500ms hold gesture
+     fired, so now and then (timer jitter) it highlighted a blank line / layout instead of text.
+     Layers, so one failing doesn't let it through: (1) html.note-hold turns user-select and the
+     callout off on every note surface incl. the overlay; (2) selectstart is cancelled meanwhile;
+     (3) after a successful hold any non-collapsed selection is cleared (also on release). A
+     failsafe ends the hold if the release event is ever lost. A normal tap/scroll/drag-select ends
+     it exactly as before (on lift or >10px of movement), so those are unaffected. */
+  let noteHoldOn = false;
+  let noteHoldOpened = false;
+  let noteHoldFailsafe = null;
+  function clearStraySelection(){
+    const sel = window.getSelection();
+    if(sel && sel.rangeCount && !sel.isCollapsed) sel.removeAllRanges();
+  }
+  function beginNoteHold(){
+    noteHoldOn = true;
+    noteHoldOpened = false;
+    document.documentElement.classList.add('note-hold');
+    clearTimeout(noteHoldFailsafe);
+    noteHoldFailsafe = setTimeout(() => endNoteHold(noteHoldOpened), 6000);
+  }
+  function endNoteHold(clearSel){
+    clearTimeout(noteHoldFailsafe);
+    if(!noteHoldOn) return;
+    noteHoldOn = false;
+    noteHoldOpened = false;
+    document.documentElement.classList.remove('note-hold');
+    if(clearSel){
+      clearStraySelection();
+      requestAnimationFrame(clearStraySelection);
+      setTimeout(clearStraySelection, 150);
+    }
+  }
+  document.addEventListener('selectstart', e => { if(noteHoldOn) e.preventDefault(); }, true);
+  document.addEventListener('selectionchange', () => { if(noteHoldOn && noteHoldOpened) clearStraySelection(); });
+
   function setupNotesLongPress(notesWrap, cut){
     let timer = null;
     let startX = 0, startY = 0;
     let cancelled = false;
+    let opened = false;
     notesWrap.addEventListener('pointerdown', e => {
       if(selectMode) return;
       if(e.pointerType === 'mouse' && e.button !== 0) return;
       startX = e.clientX; startY = e.clientY;
       cancelled = false;
+      opened = false;
       clearTimeout(timer);
-      /* See the .longpress-armed CSS comment: suppressed only while this specific hold could
-         still become an expand-open, restored the moment it's ruled out or it succeeds. */
-      notesWrap.classList.add('longpress-armed');
+      beginNoteHold();
       timer = setTimeout(() => {
-        notesWrap.classList.remove('longpress-armed');
         if(cancelled) return;
+        opened = true;
+        noteHoldOpened = true;
         const rect = notesWrap.getBoundingClientRect();
         openNotesExpand(cut, notesWrap, rect);
       }, 480);
+      const detach = () => {
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.removeEventListener('pointercancel', onUp);
+      };
       const onMove = ev => {
+        if(opened) return; /* overlay already open: keep the guard until this finger lifts */
         if(Math.hypot(ev.clientX - startX, ev.clientY - startY) > 10){
           cancelled = true;
           clearTimeout(timer);
-          notesWrap.classList.remove('longpress-armed');
-          document.removeEventListener('pointermove', onMove);
-          document.removeEventListener('pointerup', onUp);
-          document.removeEventListener('pointercancel', onUp);
+          endNoteHold(false);
+          detach();
         }
       };
       const onUp = () => {
         cancelled = true;
         clearTimeout(timer);
-        notesWrap.classList.remove('longpress-armed');
-        document.removeEventListener('pointermove', onMove);
-        document.removeEventListener('pointerup', onUp);
-        document.removeEventListener('pointercancel', onUp);
+        detach();
+        endNoteHold(opened);
       };
       document.addEventListener('pointermove', onMove);
       document.addEventListener('pointerup', onUp);
@@ -3846,6 +3902,7 @@
   function openNotesExpand(cut, notesWrap, sourceRect){
     expandedCutId = cut.id;
     if(document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    clearStraySelection();
 
     notesExpandLabel.textContent = shotLabelFor(cut.id) + ' — NOTES';
 
@@ -3890,6 +3947,7 @@
        routes text-interaction gestures to it and it eats touches in the middle of the screen. */
     notesExpandLines.contentEditable = 'false';
     expandedCutId = null;
+    endNoteHold(false);
     clearTimeout(notesHistoryTypingTimer);
     notesHistory = [];
     notesHistoryIndex = -1;
